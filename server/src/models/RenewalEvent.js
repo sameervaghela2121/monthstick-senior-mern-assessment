@@ -17,4 +17,6 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+renewalEventSchema.index({ subscription: 1, billingMonth: 1 }, { unique: true });
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);

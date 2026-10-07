@@ -27,11 +27,11 @@ function toHistoryItem(event, subscription) {
     createdAt: event.createdAt,
     subscription: subscription
       ? {
-          id: String(subscription._id),
-          name: subscription.name,
-          plan: subscription.plan,
-          billingCycle: subscription.billingCycle,
-        }
+        id: String(subscription._id),
+        name: subscription.name,
+        plan: subscription.plan,
+        billingCycle: subscription.billingCycle,
+      }
       : null,
   };
 }
@@ -45,34 +45,48 @@ router.post('/run', async (req, res, next) => {
     const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } });
     const due = subscriptions.filter((subscription) => isDueInMonth(subscription, month));
 
-    // Checking before creating is safe here: Node runs JavaScript on a single thread, so two
-    // requests can never be inside this loop at the same time.
-    const created = [];
+    let createdCount = 0;
+    let existingCount = 0;
+
     for (const subscription of due) {
+      // 1. Check if renewal already exists for this month
       const existing = await RenewalEvent.findOne({
         subscription: subscription._id,
         billingMonth: month,
       });
-      if (existing) continue;
+      if (existing) {
+        existingCount++;
+        continue;
+      }
 
-      const event = await RenewalEvent.create({
-        subscription: subscription._id,
-        billingMonth: month,
-        amount: subscription.amount,
-        currency: subscription.currency,
-      });
-      created.push(event);
+      // 2. Safe creation with concurrency guard
+      try {
+        await RenewalEvent.create({
+          subscription: subscription._id,
+          billingMonth: month,
+          amount: subscription.amount,
+          currency: subscription.currency,
+        });
+        createdCount++;
+      } catch (err) {
+        if (err.code === 11000) {
+          existingCount++;
+          continue;
+        }
+        throw err;
+      }
     }
-
     res.status(201).json({
       month,
       dueCount: due.length,
-      createdCount: created.length,
+      createdCount,
+      existingCount,
     });
   } catch (err) {
     next(err);
   }
 });
+
 
 // GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
 router.get('/', async (req, res, next) => {
