@@ -235,4 +235,4 @@ Before submitting your pull request, please confirm that:
 - [ ] Your PR description contains the requested summary, testing, trade-offs, and AI-usage notes.
 - [ ] Your PR targets the original repository's `main` branch.
 
-Thank you, and good luck.
+Thank you, and good luck....
