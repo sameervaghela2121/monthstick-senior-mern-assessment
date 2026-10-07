@@ -12,6 +12,7 @@ import { currentMonth, formatMonth, monthOptions } from './utils/months.js';
 export default function App({ initialMonth = currentMonth() }) {
   const [months] = useState(() => monthOptions(initialMonth));
   const [month, setMonth] = useState(initialMonth);
+  const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [history, setHistory] = useState({ events: [], count: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
@@ -24,22 +25,47 @@ export default function App({ initialMonth = currentMonth() }) {
   const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
+    let ignore = false;
+    const controller = new AbortController();
     setLoading(true);
-    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE }).then((data) => {
-      setHistory(data);
-      setLoading(false);
-    });
+
+    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE }, controller.signal)
+      .then((data) => {
+        if (!ignore) {
+          setHistory(data);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!ignore && err.name !== 'AbortError') {
+          setLoading(false);
+          setHistory({ events: [], count: 0, totalPages: 1 });
+        }
+      });
+
+    return () => {
+      ignore = true;
+      controller.abort();
+    };
   }, [month, page, refreshCount]);
 
   useEffect(() => {
-    fetchSummary(month).then(setSummary);
-  }, [month, refreshCount]);
+    let ignore = false;
 
-  useEffect(() => {
-    setInterval(() => {
-      fetchSummary(month).then(setSummary);
-    }, SUMMARY_POLL_MS);
-  }, []);
+    const updateSummary = () => {
+      fetchSummary(month).then(data => {
+        if (!ignore) setSummary(data);
+      });
+    };
+
+    updateSummary();
+    const interval = setInterval(updateSummary, SUMMARY_POLL_MS);
+
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, [month, refreshCount]);
 
   async function runAction(action, onResult) {
     setBusy(true);
@@ -54,12 +80,28 @@ export default function App({ initialMonth = currentMonth() }) {
     }
   }
 
+  const handleMonthChange = (newMonth) => {
+    setMonth(newMonth);
+    setPage(1);
+  }
+
+  function handleStatusChange(e) {
+    setStatus(e.target.value);
+    setPage(1);
+  }
+
   return (
     <main className="app">
       <header>
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
-          <MonthPicker value={month} options={months} onChange={setMonth} />
+          <MonthPicker value={month} options={months} onChange={handleMonthChange} />
+          <select id="status-filter" value={status} onChange={handleStatusChange}>
+            <option value="">All</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="charged">Charged</option>
+            <option value="failed">Failed</option>
+          </select>
           <button type="button" onClick={() => runAction(runRenewals, setRunSummary)}>
             Run renewals
           </button>

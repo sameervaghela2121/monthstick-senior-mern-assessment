@@ -7,7 +7,7 @@
 // Call it as `paymentGateway.charge(...)` (tests replace this method with a stub that
 // follows the same contract).
 
-const MAX_CONCURRENT_CHARGES = 4;
+export const MAX_CONCURRENT_CHARGES = 4;
 const DECLINE_RATE = 0.25;
 
 class GatewayError extends Error {

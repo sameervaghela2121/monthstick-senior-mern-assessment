@@ -42,6 +42,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Error during startup:", err);
   process.exit(1);
 });

@@ -13,18 +13,35 @@ async function getRevenueSummary(month) {
 
   const byStatus = { scheduled: 0, charged: 0, failed: 0 };
   let subtotal = 0;
+  let tax = 0;
+
   for (const event of events) {
-    subtotal += event.amount / 100;
+    subtotal += event.amount; // operate integer cents
+
+    // Calculate per-event tax, banker's rounding (round to even)
+    const eventTaxRaw = event.amount * TAX_RATE;
+    const integerPart = Math.floor(eventTaxRaw);
+    const fractionalPart = eventTaxRaw - integerPart;
+    let eventTax;
+
+    if (fractionalPart < 0.5) {
+      eventTax = integerPart;
+    } else if (fractionalPart > 0.5) {
+      eventTax = integerPart + 1;
+    } else {
+      eventTax = integerPart % 2 === 0 ? integerPart : integerPart + 1;
+    }
+
+    tax += eventTax;
     byStatus[event.status] += 1;
   }
-  const tax = subtotal * TAX_RATE;
 
   const summary = {
     month,
     eventCount: events.length,
-    subtotal: Math.round(subtotal * 100),
-    tax: Math.round(tax * 100),
-    total: Math.round((subtotal + tax) * 100),
+    subtotal,
+    tax,
+    total: subtotal + tax,
     byStatus,
   };
 
