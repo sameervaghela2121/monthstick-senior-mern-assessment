@@ -17,4 +17,12 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// One renewal per subscription per billing month. Concurrent runs rely on this,
+// not on an in-memory lock. Existing duplicates must be collapsed before the
+// index is built (see collapseDuplicateRenewalEvents).
+renewalEventSchema.index(
+  { subscription: 1, billingMonth: 1 },
+  { unique: true, name: 'uniq_subscription_billingMonth' },
+);
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);
