@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../src/app');
 const { RenewalEvent } = require('../src/models');
-const { seedSubscriptions } = require('../scripts/seedData');
-const { startDatabase, resetDatabase, stopDatabase } = require('./helpers/db');
+const { seedSubscriptions, seedLargeDataset } = require('../scripts/seedData');
+const { startDatabase, resetDatabase, stopDatabase, commands } = require('./helpers/db');
 
 const app = createApp();
 
@@ -13,9 +13,10 @@ async function namesForMonth(month) {
   return events.map((e) => e.subscription.name).sort();
 }
 
+before(startDatabase);
+after(stopDatabase);
+
 describe('Renewals API', () => {
-  before(startDatabase);
-  after(stopDatabase);
   beforeEach(async () => {
     await resetDatabase();
     await seedSubscriptions();
@@ -84,5 +85,150 @@ describe('Renewals API', () => {
     const res = await request(app).get('/api/nope');
     assert.equal(res.status, 404);
     assert.ok(res.body.error);
+  });
+});
+
+describe('Renewal runs are idempotent', () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedSubscriptions();
+  });
+
+  test('re-running a month creates nothing new and reports what already existed', async () => {
+    const first = await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+    const second = await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+
+    assert.equal(first.status, 201);
+    assert.equal(first.body.createdCount, 3);
+    assert.equal(first.body.alreadyExistedCount, 0);
+    assert.deepEqual(first.body.created.map((c) => c.name).sort(), ['Figma', 'GitHub Copilot', 'Netflix']);
+    assert.ok(first.body.created.every((c) => typeof c.eventId === 'string' && typeof c.subscriptionId === 'string'));
+
+    assert.equal(second.status, 200);
+    assert.equal(second.body.dueCount, 3);
+    assert.equal(second.body.createdCount, 0);
+    assert.equal(second.body.alreadyExistedCount, 3);
+    assert.deepEqual(second.body.alreadyExisted.map((c) => c.name).sort(), ['Figma', 'GitHub Copilot', 'Netflix']);
+
+    assert.equal(await RenewalEvent.countDocuments({ billingMonth: '2026-10' }), 3);
+  });
+
+  test('a re-run does not modify existing events', async () => {
+    await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+    await RenewalEvent.updateMany({ billingMonth: '2026-10' }, { status: 'charged' });
+    const original = await RenewalEvent.find({ billingMonth: '2026-10' }).sort({ _id: 1 }).lean();
+
+    await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+
+    const current = await RenewalEvent.find({ billingMonth: '2026-10' }).sort({ _id: 1 }).lean();
+    assert.deepEqual(current, original);
+  });
+
+  test('concurrent runs for the same month never create duplicates', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () => request(app).post('/api/renewals/run').send({ month: '2026-10' })),
+    );
+
+    assert.ok(responses.every((res) => [200, 201].includes(res.status)));
+    const totalCreated = responses.reduce((sum, res) => sum + res.body.createdCount, 0);
+    assert.equal(totalCreated, 3);
+    assert.deepEqual(await namesForMonth('2026-10'), ['Figma', 'GitHub Copilot', 'Netflix']);
+  });
+
+  test('the database itself rejects a duplicate event for the same subscription and month', async () => {
+    await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+    const existing = await RenewalEvent.findOne({ billingMonth: '2026-10' }).lean();
+
+    await assert.rejects(
+      RenewalEvent.create({ subscription: existing.subscription, billingMonth: '2026-10', amount: 1 }),
+      { code: 11000 },
+    );
+  });
+
+  test('unexpected database errors are not swallowed and do not leak details', async (t) => {
+    t.mock.method(RenewalEvent, 'bulkWrite', async () => {
+      throw new Error('connection reset by peer: secret-host:27017');
+    });
+    t.mock.method(console, 'error', () => {});
+
+    const res = await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+
+    assert.equal(res.status, 500);
+    assert.deepEqual(res.body, { error: { code: 'INTERNAL_ERROR', message: 'Internal Server Error' } });
+  });
+});
+
+describe('Month validation', () => {
+  beforeEach(resetDatabase);
+
+
+  const invalidMonths = ['2026-13', '2026-00', '2026-1', '26-10', '2026/10', '2026-10-01', 'October', '', ' 2026-10'];
+
+  for (const month of invalidMonths) {
+    test(`POST /api/renewals/run rejects ${JSON.stringify(month)} with 400`, async () => {
+      const res = await request(app).post('/api/renewals/run').send({ month });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'INVALID_MONTH');
+      assert.equal(res.body.error.field, 'month');
+      assert.match(res.body.error.message, /YYYY-MM/);
+    });
+
+    test(`GET /api/renewals rejects ${JSON.stringify(month)} with 400`, async () => {
+      const res = await request(app).get('/api/renewals').query({ month });
+      assert.equal(res.status, 400);
+      assert.equal(res.body.error.code, 'INVALID_MONTH');
+    });
+  }
+
+  test('rejects a missing month and non-string values', async () => {
+    for (const body of [{}, { month: 202610 }, { month: ['2026-10'] }, { month: null }]) {
+      const res = await request(app).post('/api/renewals/run').send(body);
+      assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+    }
+
+    const missing = await request(app).get('/api/renewals');
+    assert.equal(missing.status, 400);
+
+    const repeated = await request(app).get('/api/renewals?month=2026-10&month=2026-11');
+    assert.equal(repeated.status, 400);
+  });
+
+  test('rejects malformed JSON without exposing parser internals', async () => {
+    const res = await request(app)
+      .post('/api/renewals/run')
+      .set('Content-Type', 'application/json')
+      .send('{"month": ');
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } });
+  });
+});
+
+describe('Renewal history performance', () => {
+  beforeEach(async () => {
+    await resetDatabase();
+    await seedLargeDataset(200);
+  });
+
+  test('history is served by a single database command regardless of the number of events', async () => {
+    commands.length = 0;
+    const res = await request(app).get('/api/renewals').query({ month: '2026-09' });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.count, 180);
+    assert.equal(res.body.events.length, 180);
+    assert.ok(res.body.events.every((e) => e.subscription && e.subscription.name));
+
+    // getMore is excluded: it fetches the next batch of the same cursor, not a new query.
+    const queries = commands.filter((c) => ['find', 'aggregate', 'count'].includes(c.commandName));
+    assert.equal(queries.length, 1, `expected 1 query, got: ${queries.map((c) => c.commandName).join(', ')}`);
+  });
+
+  test('history uses the billingMonth index instead of a collection scan', async () => {
+    const plan = await RenewalEvent.find({ billingMonth: '2026-09' }).sort({ createdAt: 1, _id: 1 }).explain();
+    const stages = JSON.stringify(plan.queryPlanner.winningPlan);
+
+    assert.match(stages, /billingMonth_1_createdAt_1__id_1/);
+    assert.doesNotMatch(stages, /COLLSCAN/);
   });
 });

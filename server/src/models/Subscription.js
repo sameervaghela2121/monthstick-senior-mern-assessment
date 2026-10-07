@@ -14,4 +14,7 @@ const subscriptionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Serves the renewal run's candidate query: { status: 'active', startDate: { $lt: <end of month> } }.
+subscriptionSchema.index({ status: 1, startDate: 1 });
+
 module.exports = mongoose.models.Subscription || mongoose.model('Subscription', subscriptionSchema);
