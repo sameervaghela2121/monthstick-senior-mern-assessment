@@ -1,3 +1,10 @@
+// YYYY-MM with a real month number (01-12).
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function isValidMonth(month) {
+  return MONTH_PATTERN.test(month);
+}
+
 function getMonthRange(month) {
   const [year, monthNumber] = month.split('-').map(Number);
   return {
@@ -17,4 +24,4 @@ function isDueInMonth(subscription, month) {
   return month.slice(5, 7) === startMonth.slice(5, 7);
 }
 
-module.exports = { getMonthRange, isDueInMonth, toMonthKey };
+module.exports = { isValidMonth, getMonthRange, isDueInMonth, toMonthKey };
