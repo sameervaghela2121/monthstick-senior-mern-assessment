@@ -1,13 +1,14 @@
 function getMonthRange(month) {
   const [year, monthNumber] = month.split('-').map(Number);
   return {
-    start: new Date(year, monthNumber - 1, 1),
-    end: new Date(year, monthNumber, 1),
+    start: new Date(Date.UTC(year, monthNumber - 1, 1)),
+    end: new Date(Date.UTC(year, monthNumber, 1)),
   };
 }
 
 function toMonthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  const d = new Date(date);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 function isDueInMonth(subscription, month) {

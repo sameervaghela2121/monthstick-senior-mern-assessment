@@ -25,4 +25,10 @@ describe('billing utils', () => {
     assert.equal(isDueInMonth(sub('yearly', '2024-10-03'), '2026-11'), false);
     assert.equal(isDueInMonth(sub('yearly', '2026-10-03'), '2025-10'), false);
   });
+
+  test('monthly subscriptions starting late in UTC are due in that UTC month', () => {
+    const canva = { billingCycle: 'monthly', startDate: new Date('2026-10-31T21:00:00Z') };
+    assert.equal(isDueInMonth(canva, '2026-10'), true);
+    assert.equal(isDueInMonth(canva, '2026-09'), false);
+  });
 });

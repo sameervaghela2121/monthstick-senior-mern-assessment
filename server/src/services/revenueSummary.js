@@ -6,6 +6,18 @@ const TAX_RATE = 0.18;
 // Summaries are expensive to build for large months, so they are cached per month.
 const cache = new Map();
 
+/**
+ * Banker's Rounding (Round half to even) for minor currency units (cents).
+ */
+function roundHalfToEven(value) {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (Math.abs(diff - 0.5) < 1e-9) {
+    return floor % 2 === 0 ? floor : floor + 1;
+  }
+  return Math.round(value);
+}
+
 async function getRevenueSummary(month) {
   if (cache.has(month)) return cache.get(month);
 
@@ -13,18 +25,28 @@ async function getRevenueSummary(month) {
 
   const byStatus = { scheduled: 0, charged: 0, failed: 0 };
   let subtotal = 0;
+  let tax = 0;
+  let total = 0;
+
   for (const event of events) {
-    subtotal += event.amount / 100;
-    byStatus[event.status] += 1;
+    const eventAmount = event.amount;
+    const eventTax = roundHalfToEven(eventAmount * TAX_RATE);
+    const eventTotal = eventAmount + eventTax;
+
+    subtotal += eventAmount;
+    tax += eventTax;
+    total += eventTotal;
+    if (byStatus[event.status] !== undefined) {
+      byStatus[event.status] += 1;
+    }
   }
-  const tax = subtotal * TAX_RATE;
 
   const summary = {
     month,
     eventCount: events.length,
-    subtotal: Math.round(subtotal * 100),
-    tax: Math.round(tax * 100),
-    total: Math.round((subtotal + tax) * 100),
+    subtotal,
+    tax,
+    total,
     byStatus,
   };
 
@@ -32,8 +54,12 @@ async function getRevenueSummary(month) {
   return summary;
 }
 
-function clearSummaryCache() {
-  cache.clear();
+function clearSummaryCache(month) {
+  if (month) {
+    cache.delete(month);
+  } else {
+    cache.clear();
+  }
 }
 
-module.exports = { TAX_RATE, getRevenueSummary, clearSummaryCache };
+module.exports = { TAX_RATE, getRevenueSummary, clearSummaryCache, roundHalfToEven };

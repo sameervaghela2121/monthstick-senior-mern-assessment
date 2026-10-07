@@ -125,7 +125,7 @@ describe('Renewals API', () => {
   });
 
   describe('GET /api/renewals/summary', () => {
-    test('summarises the month after a renewal run', async () => {
+    test('summarises the month after a renewal run with banker rounding and updates after payments', async () => {
       await request(app).post('/api/renewals/run').send({ month: '2026-10' });
 
       const res = await request(app).get('/api/renewals/summary').query({ month: '2026-10' });
@@ -134,9 +134,16 @@ describe('Renewals API', () => {
       assert.equal(res.body.month, '2026-10');
       assert.equal(res.body.eventCount, 4);
       assert.equal(res.body.subtotal, 2299 + 14400 + 1000 + 1059);
+      assert.equal(res.body.tax, 414 + 2592 + 180 + 191);
+      assert.equal(res.body.total, res.body.subtotal + res.body.tax);
       assert.deepEqual(res.body.byStatus, { scheduled: 4, charged: 0, failed: 0 });
-      assert.equal(typeof res.body.tax, 'number');
-      assert.equal(typeof res.body.total, 'number');
+
+      // Test cache invalidation after payment update
+      const event = await eventFor('Netflix', '2026-10');
+      await request(app).patch(`/api/renewals/${event._id}/status`).send({ status: 'charged' });
+
+      const updatedRes = await request(app).get('/api/renewals/summary').query({ month: '2026-10' });
+      assert.deepEqual(updatedRes.body.byStatus, { scheduled: 3, charged: 1, failed: 0 });
     });
   });
 

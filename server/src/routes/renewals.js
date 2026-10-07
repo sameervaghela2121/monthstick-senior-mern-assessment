@@ -1,7 +1,7 @@
 const express = require('express');
 const { Subscription, RenewalEvent } = require('../models');
 const { getMonthRange, isDueInMonth } = require('../utils/billing');
-const { getRevenueSummary } = require('../services/revenueSummary');
+const { getRevenueSummary, clearSummaryCache } = require('../services/revenueSummary');
 const { paymentGateway } = require('../services/paymentGateway');
 const mongoose = require('mongoose');
 const router = express.Router();
@@ -87,6 +87,9 @@ router.post('/run', async (req, res, next) => {
         }
         throw err;
       }
+    }
+    if (createdCount > 0) {
+      clearSummaryCache(month);
     }
     res.status(201).json({
       month,
@@ -190,6 +193,8 @@ router.patch('/:id/status', async (req, res, next) => {
     if (status === 'charged') event.chargedAt = new Date();
     await event.save();
 
+    clearSummaryCache(event.billingMonth);
+
     const subscription = await Subscription.findById(event.subscription);
     res.json(toHistoryItem(event, subscription));
   } catch (err) {
@@ -256,6 +261,10 @@ router.post('/retry-failed', async (req, res, next) => {
     });
 
     await Promise.all(workers);
+
+    if (chargedCount > 0) {
+      clearSummaryCache(month);
+    }
 
     res.json({
       month,
