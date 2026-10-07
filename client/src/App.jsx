@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchRenewalHistory, runRenewals } from './api.js';
 import MonthPicker from './components/MonthPicker.jsx';
 import RenewalHistoryTable from './components/RenewalHistoryTable.jsx';
@@ -11,18 +11,44 @@ export default function App({ initialMonth = currentMonth() }) {
   const [month, setMonth] = useState(initialMonth);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const historyRequestRef = useRef(0);
 
   const [running, setRunning] = useState(false);
   const [runSummary, setRunSummary] = useState(null);
   const [runError, setRunError] = useState(null);
 
   useEffect(() => {
-    setLoading(true);
-    fetchRenewalHistory(month).then((data) => {
-      setEvents(data.events);
-      setLoading(false);
-    });
+    const requestId = historyRequestRef.current + 1;
+    historyRequestRef.current = requestId;
+    const controller = new AbortController();
+
+    async function loadHistory() {
+      setLoading(true);
+      setHistoryError(null);
+      setEvents([]);
+
+      try {
+        const data = await fetchRenewalHistory(month, controller.signal);
+        if (requestId !== historyRequestRef.current) return;
+        setEvents(data.events);
+      } catch (err) {
+        if (controller.signal.aborted || requestId !== historyRequestRef.current) return;
+        setEvents([]);
+        setHistoryError(err.message);
+      } finally {
+        if (requestId === historyRequestRef.current) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      controller.abort();
+    };
   }, [month, refreshCount]);
 
   async function handleRunRenewals() {
@@ -52,11 +78,13 @@ export default function App({ initialMonth = currentMonth() }) {
       </header>
 
       <ErrorBanner message={runError} />
+      <ErrorBanner message={historyError} />
       <RunSummary summary={runSummary} />
 
       <section aria-labelledby="history-heading">
         <h2 id="history-heading">Renewal history: {formatMonth(month)}</h2>
         {loading && <p className="loading">Loading renewal history…</p>}
+        {!loading && historyError && <p className="empty">Unable to load renewal history for this month.</p>}
         <RenewalHistoryTable events={events} />
       </section>
     </main>

@@ -1,6 +1,6 @@
 const express = require('express');
 const { Subscription, RenewalEvent } = require('../models');
-const { getMonthRange, isDueInMonth } = require('../utils/billing');
+const { getMonthRange, isDueInMonth, isValidMonth } = require('../utils/billing');
 
 const router = express.Router();
 
@@ -23,36 +23,68 @@ function toHistoryItem(event, subscription) {
   };
 }
 
+function validateMonth(month) {
+  if (!isValidMonth(month)) {
+    const error = new Error('Invalid month. Expected YYYY-MM, for example 2026-10.');
+    error.status = 400;
+    throw error;
+  }
+}
+
 // POST /api/renewals/run  { "month": "YYYY-MM" }
 router.post('/run', async (req, res, next) => {
   try {
     const { month } = req.body;
-    const { end } = getMonthRange(month);
+    validateMonth(month);
 
-    const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } });
+    const { end } = getMonthRange(month);
+    const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } }).lean();
     const due = subscriptions.filter((subscription) => isDueInMonth(subscription, month));
 
+    let createdCount = 0;
+    let existingCount = 0;
     const created = [];
-    for (const subscription of due) {
-      const existing = await RenewalEvent.findOne({
-        subscription: subscription._id,
-        billingMonth: month,
-      });
-      if (existing) continue;
+    const existing = [];
 
-      const event = await RenewalEvent.create({
-        subscription: subscription._id,
-        billingMonth: month,
-        amount: subscription.amount,
-        currency: subscription.currency,
-      });
-      created.push(event);
+    for (const subscription of due) {
+      const result = await RenewalEvent.updateOne(
+        { subscription: subscription._id, billingMonth: month },
+        {
+          $setOnInsert: {
+            subscription: subscription._id,
+            billingMonth: month,
+            amount: subscription.amount,
+            currency: subscription.currency,
+            status: 'scheduled',
+          },
+        },
+        { upsert: true },
+      );
+
+      if (result.upsertedCount > 0) {
+        createdCount += 1;
+        created.push({
+          id: String(subscription._id),
+          name: subscription.name,
+          plan: subscription.plan,
+        });
+      } else {
+        existingCount += 1;
+        existing.push({
+          id: String(subscription._id),
+          name: subscription.name,
+          plan: subscription.plan,
+        });
+      }
     }
 
     res.status(201).json({
       month,
       dueCount: due.length,
-      createdCount: created.length,
+      createdCount,
+      existingCount,
+      created,
+      existing,
     });
   } catch (err) {
     next(err);
@@ -63,15 +95,34 @@ router.post('/run', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const { month } = req.query;
+    validateMonth(month);
 
     const count = await RenewalEvent.countDocuments({ billingMonth: month });
-    const events = await RenewalEvent.find({ billingMonth: month }).sort({ createdAt: 1 });
+    const events = await RenewalEvent.aggregate([
+      { $match: { billingMonth: month } },
+      { $sort: { createdAt: 1 } },
+      {
+        $lookup: {
+          from: 'subscriptions',
+          localField: 'subscription',
+          foreignField: '_id',
+          as: 'subscriptionDetails',
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          subscription: { $arrayElemAt: ['$subscriptionDetails', 0] },
+          billingMonth: 1,
+          amount: 1,
+          currency: 1,
+          status: 1,
+          createdAt: 1,
+        },
+      },
+    ]);
 
-    const items = [];
-    for (const event of events) {
-      const subscription = await Subscription.findById(event.subscription);
-      items.push(toHistoryItem(event, subscription));
-    }
+    const items = events.map((event) => toHistoryItem(event, event.subscription));
 
     res.json({ month, count, events: items });
   } catch (err) {
