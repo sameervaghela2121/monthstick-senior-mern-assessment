@@ -89,36 +89,36 @@ router.post('/run', async (req, res, next) => {
 
 
 // GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
+// GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
 router.get('/', async (req, res, next) => {
   try {
     const { month } = req.query;
-    const page = Number(req.query.page) || 1;
+    const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Number(req.query.pageSize) || DEFAULT_PAGE_SIZE;
 
     const count = await RenewalEvent.countDocuments({ billingMonth: month });
     const events = await RenewalEvent.find({ billingMonth: month })
+      .populate('subscription')
       .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
-      .limit(pageSize);
+      .limit(pageSize)
+      .lean();
 
-    const items = [];
-    for (const event of events) {
-      const subscription = await Subscription.findById(event.subscription);
-      items.push(toHistoryItem(event, subscription));
-    }
+    const items = events.map((event) => toHistoryItem(event, event.subscription));
 
     res.json({
       month,
       count,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.floor(count / pageSize)),
+      totalPages: Math.max(1, Math.ceil(count / pageSize)),
       events: items,
     });
   } catch (err) {
     next(err);
   }
 });
+
 
 // GET /api/renewals/summary?month=YYYY-MM
 router.get('/summary', async (req, res, next) => {
