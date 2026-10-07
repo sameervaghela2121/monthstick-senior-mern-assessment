@@ -18,10 +18,24 @@ async function resolveMongoUri() {
 // A failed index build must not take the API down, so it is logged and startup continues.
 async function ensureIndexes() {
   for (const model of Object.values(mongoose.models)) {
-    try {
-      await model.createIndexes();
-    } catch (err) {
-      console.warn(`[startup] could not build indexes for ${model.modelName}: ${err.message}`);
+    const indexes = model.schema.indexes();
+    if (indexes.length === 0) {
+      try {
+        await model.createIndexes();
+      } catch (err) {
+        console.warn(`[startup] could not build indexes for ${model.modelName}: ${err.message}`);
+      }
+      continue;
+    }
+
+    for (const [fields, options] of indexes) {
+      try {
+        await model.collection.createIndex(fields, options);
+      } catch (err) {
+        console.warn(
+          `[startup] could not build index for ${model.modelName} ${JSON.stringify(fields)}: ${err.message}`,
+        );
+      }
     }
   }
 }

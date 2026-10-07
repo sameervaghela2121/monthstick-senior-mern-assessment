@@ -17,4 +17,11 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// One event per subscription per billing month. If production still has duplicates,
+// this unique index fails to build until those rows are collapsed. The other indexes
+// are created separately so a failed unique index does not block history queries.
+renewalEventSchema.index({ subscription: 1, billingMonth: 1 }, { unique: true });
+renewalEventSchema.index({ billingMonth: 1, createdAt: 1, _id: 1 });
+renewalEventSchema.index({ billingMonth: 1, status: 1, createdAt: 1, _id: 1 });
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);

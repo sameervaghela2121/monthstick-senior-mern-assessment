@@ -5,6 +5,9 @@ export default function RunSummary({ summary }) {
   return (
     <p className="run-summary" role="status">
       Renewal run for {formatMonth(summary.month)}: {summary.createdCount} created
+      {summary.alreadyExistedCount > 0
+        ? `, ${summary.alreadyExistedCount} already existed`
+        : ''}
       {' '}({summary.dueCount} due).
     </p>
   );

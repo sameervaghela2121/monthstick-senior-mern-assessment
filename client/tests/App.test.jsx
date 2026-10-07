@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../src/App.jsx';
 import * as api from '../src/api.js';
@@ -137,5 +137,80 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Run renewals' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Renewal service unavailable');
+  });
+
+  test('ignores a slow history response from the previously selected month', async () => {
+    let resolveOctober;
+    api.fetchRenewalHistory.mockImplementation((month) => {
+      if (month === '2026-10') {
+        return new Promise((resolve) => {
+          resolveOctober = () => resolve(historyFor('2026-10', ['Netflix']));
+        });
+      }
+      return Promise.resolve(historyFor(month, ['Spotify']));
+    });
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    expect(await screen.findByText('Loading renewal history…')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+    expect(await screen.findByText('Spotify')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOctober();
+    });
+
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
+    expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+  });
+
+  test('shows an error when renewal history fails to load', async () => {
+    api.fetchRenewalHistory.mockRejectedValue(new Error('Could not load renewal history'));
+
+    render(<App initialMonth="2026-10" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load renewal history');
+    expect(screen.queryByText(/No renewal events/)).not.toBeInTheDocument();
+  });
+
+  test('filters by status and returns to page 1 when the month or status changes', async () => {
+    api.fetchRenewalHistory.mockImplementation(async (month, options = {}) =>
+      historyFor(month, [`${options.status || 'all'}-${options.page}`], {
+        page: options.page,
+        totalPages: 3,
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-09" />);
+
+    const statusSelect = screen.getByLabelText('Status');
+    expect([...statusSelect.options].map((option) => [option.value, option.text])).toEqual([
+      ['', 'All'],
+      ['scheduled', 'Scheduled'],
+      ['charged', 'Charged'],
+      ['failed', 'Failed'],
+    ]);
+    expect(await screen.findByText('all-1')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('all-2')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-10');
+    expect(await screen.findByText('all-1')).toBeInTheDocument();
+    expect(api.fetchRenewalHistory.mock.calls.at(-1)).toEqual([
+      '2026-10',
+      expect.objectContaining({ page: 1 }),
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('all-2')).toBeInTheDocument();
+
+    await user.selectOptions(statusSelect, 'failed');
+    expect(await screen.findByText('failed-1')).toBeInTheDocument();
+    expect(api.fetchRenewalHistory.mock.calls.at(-1)[1]).toEqual(
+      expect.objectContaining({ page: 1, status: 'failed' }),
+    );
   });
 });
