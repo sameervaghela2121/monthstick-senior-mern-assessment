@@ -3,7 +3,7 @@ const { Subscription, RenewalEvent } = require('../models');
 const { getMonthRange, isDueInMonth } = require('../utils/billing');
 const { getRevenueSummary } = require('../services/revenueSummary');
 const { paymentGateway } = require('../services/paymentGateway');
-
+const mongoose = require('mongoose');
 const router = express.Router();
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -13,6 +13,14 @@ const ALLOWED_TRANSITIONS = {
   failed: ['charged', 'failed'],
   charged: [],
 };
+
+const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
+const VALID_EVENT_STATUSES = ['scheduled', 'charged', 'failed'];
+
+function isValidMonth(month) {
+  return typeof month === 'string' && MONTH_REGEX.test(month);
+}
+
 
 function toHistoryItem(event, subscription) {
   return {
@@ -40,6 +48,10 @@ function toHistoryItem(event, subscription) {
 router.post('/run', async (req, res, next) => {
   try {
     const { month } = req.body;
+    if (!isValidMonth(month)) {
+      return res.status(400).json({ error: { message: 'Invalid or missing month. Expected format YYYY-MM.' } });
+    }
+
     const { end } = getMonthRange(month);
 
     const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } });
@@ -87,17 +99,33 @@ router.post('/run', async (req, res, next) => {
   }
 });
 
-
-// GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
 // GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
 router.get('/', async (req, res, next) => {
   try {
-    const { month } = req.query;
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const pageSize = Number(req.query.pageSize) || DEFAULT_PAGE_SIZE;
+    const { month, status } = req.query;
 
-    const count = await RenewalEvent.countDocuments({ billingMonth: month });
-    const events = await RenewalEvent.find({ billingMonth: month })
+    if (!isValidMonth(month)) {
+      return res.status(400).json({ error: { message: 'Invalid or missing month. Expected format YYYY-MM.' } });
+    }
+
+    const page = req.query.page !== undefined ? Number(req.query.page) : 1;
+    const pageSize = req.query.pageSize !== undefined ? Number(req.query.pageSize) : DEFAULT_PAGE_SIZE;
+
+    if (!Number.isInteger(page) || page < 1) {
+      return res.status(400).json({ error: { message: 'page must be a positive integer.' } });
+    }
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 200) {
+      return res.status(400).json({ error: { message: 'pageSize must be an integer between 1 and 200.' } });
+    }
+    if (status && !VALID_EVENT_STATUSES.includes(status)) {
+      return res.status(400).json({ error: { message: `status must be one of: ${VALID_EVENT_STATUSES.join(', ')}` } });
+    }
+
+    const filter = { billingMonth: month };
+    if (status) filter.status = status;
+
+    const count = await RenewalEvent.countDocuments(filter);
+    const events = await RenewalEvent.find(filter)
       .populate('subscription')
       .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
@@ -119,11 +147,14 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-
 // GET /api/renewals/summary?month=YYYY-MM
 router.get('/summary', async (req, res, next) => {
   try {
-    res.json(await getRevenueSummary(req.query.month));
+    const { month } = req.query;
+    if (!isValidMonth(month)) {
+      return res.status(400).json({ error: { message: 'Invalid or missing month. Expected format YYYY-MM.' } });
+    }
+    res.json(await getRevenueSummary(month));
   } catch (err) {
     next(err);
   }
@@ -133,9 +164,17 @@ router.get('/summary', async (req, res, next) => {
 // Called by the payment provider's webhook. Every call records one charge attempt.
 router.patch('/:id/status', async (req, res, next) => {
   try {
+    const { id } = req.params;
     const { status, failureReason } = req.body;
 
-    const event = await RenewalEvent.findById(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: { message: 'Invalid event id format.' } });
+    }
+    if (!['charged', 'failed'].includes(status)) {
+      return res.status(400).json({ error: { message: 'status must be "charged" or "failed".' } });
+    }
+
+    const event = await RenewalEvent.findById(id);
     if (!event) {
       return res.status(404).json({ error: { message: 'Renewal event not found' } });
     }
@@ -162,6 +201,9 @@ router.patch('/:id/status', async (req, res, next) => {
 router.post('/retry-failed', async (req, res, next) => {
   try {
     const { month } = req.body;
+    if (!isValidMonth(month)) {
+      return res.status(400).json({ error: { message: 'Invalid or missing month. Expected format YYYY-MM.' } });
+    }
     const failed = await RenewalEvent.find({ billingMonth: month, status: 'failed' });
 
     failed.forEach(async (event) => {
