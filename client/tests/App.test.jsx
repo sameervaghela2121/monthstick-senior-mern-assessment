@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../src/App.jsx';
 import * as api from '../src/api.js';
@@ -45,6 +45,13 @@ function summaryFor(month, total = 0) {
 }
 
 const pageRequested = (call) => JSON.stringify(call.slice(1)).match(/"page":(\d+)/)?.[1];
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
 
 describe('App', () => {
   beforeEach(() => {
@@ -93,6 +100,50 @@ describe('App', () => {
 
     expect(await screen.findByText('Customer 2')).toBeInTheDocument();
     expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+  });
+
+  test('status filter requests page one and resets pagination', async () => {
+    api.fetchRenewalHistory.mockImplementation(async (month, options = {}) =>
+      historyFor(month, ['Netflix'], { page: options.page, totalPages: 3 }),
+    );
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await screen.findByText('Netflix');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Page 2 of 3');
+    await user.selectOptions(screen.getByLabelText('Status'), 'failed');
+
+    await screen.findByText('Page 1 of 3');
+    const filteredCall = api.fetchRenewalHistory.mock.calls.at(-1);
+    expect(filteredCall[1]).toMatchObject({ page: 1, status: 'failed' });
+  });
+
+  test('late history and summary responses cannot replace the selected month', async () => {
+    const oldHistory = deferred();
+    const oldSummary = deferred();
+    api.fetchRenewalHistory.mockImplementation((month) =>
+      month === '2026-10' ? oldHistory.promise : Promise.resolve(historyFor(month, ['Spotify'])),
+    );
+    api.fetchSummary.mockImplementation((month) =>
+      month === '2026-10' ? oldSummary.promise : Promise.resolve(summaryFor(month, 200)),
+    );
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+    expect(await screen.findByText('Spotify')).toBeInTheDocument();
+    expect(await screen.findByTestId('summary-total')).toHaveTextContent('$2.00');
+
+    await act(async () => {
+      oldHistory.resolve(historyFor('2026-10', ['Stale October']));
+      oldSummary.resolve(summaryFor('2026-10', 99900));
+    });
+
+    expect(screen.queryByText('Stale October')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /November 2026/ })).toBeInTheDocument();
+    expect(screen.getByTestId('summary-total')).toHaveTextContent('$2.00');
+    expect(api.fetchSummary.mock.calls[0][1].signal.aborted).toBe(true);
   });
 
   test('running renewals shows a summary and refreshes the history', async () => {

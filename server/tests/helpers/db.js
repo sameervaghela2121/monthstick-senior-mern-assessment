@@ -9,8 +9,15 @@ let mongod;
 const commands = [];
 
 async function startDatabase() {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri('monthstick-test'), { monitorCommands: true });
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
+
+  if (uri) {
+    await mongoose.connect(uri, { monitorCommands: true, dbName: 'monthstick-test' });
+  } else {
+    mongod = await MongoMemoryServer.create();
+    await mongoose.connect(mongod.getUri('monthstick-test'), { monitorCommands: true });
+  }
+
   mongoose.connection.getClient().on('commandStarted', (event) => commands.push(event));
   await mongoose.connection.syncIndexes();
 }

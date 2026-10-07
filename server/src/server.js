@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { createApp } = require('./app');
-const { Subscription } = require('./models');
+const { Subscription, RenewalEvent } = require('./models');
 const { seedDatabase } = require('../scripts/seedData');
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -15,9 +15,22 @@ async function resolveMongoUri() {
 }
 
 // Indexes are built after startup data is in place, like a production deploy against existing data.
-// A failed index build must not take the API down, so it is logged and startup continues.
 async function ensureIndexes() {
+  try {
+    await RenewalEvent.createIndexes();
+  } catch (err) {
+    if (err?.code === 11000 || err?.codeName === 'DuplicateKey') {
+      throw new Error(
+        'Cannot start: duplicate renewal events exist for a subscription and billing month. ' +
+          'Back up the database, reconcile duplicates, then build the unique index.',
+        { cause: err },
+      );
+    }
+    throw err;
+  }
+
   for (const model of Object.values(mongoose.models)) {
+    if (model === RenewalEvent) continue;
     try {
       await model.createIndexes();
     } catch (err) {

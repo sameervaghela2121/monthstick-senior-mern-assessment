@@ -13,8 +13,17 @@ const renewalEventSchema = new mongoose.Schema(
     attempts: { type: Number, default: 0, min: 0 },
     failureReason: { type: String },
     chargedAt: { type: Date },
+    processedAttemptIds: { type: [String], default: [] },
+    retryToken: { type: String },
+    retryAttemptId: { type: String },
+    retryAttemptStartedAt: { type: Date },
+    retryLockedAt: { type: Date },
   },
   { timestamps: true },
 );
+
+renewalEventSchema.index({ subscription: 1, billingMonth: 1 }, { unique: true });
+renewalEventSchema.index({ billingMonth: 1, status: 1, createdAt: 1, _id: 1 });
+renewalEventSchema.index({ billingMonth: 1, createdAt: 1, _id: 1 });
 
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);
