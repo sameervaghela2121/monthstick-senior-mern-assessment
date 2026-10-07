@@ -107,6 +107,21 @@ describe('Renewals API', () => {
       assert.equal(res.body.count, 0);
       assert.deepEqual(res.body.events, []);
     });
+
+    test('filters renewals by status', async () => {
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      const event = await eventFor('Netflix', '2026-10');
+      await request(app).patch(`/api/renewals/${event._id}/status`).send({ status: 'charged' });
+
+      const chargedRes = await request(app).get('/api/renewals').query({ month: '2026-10', status: 'charged' });
+      assert.equal(chargedRes.status, 200);
+      assert.equal(chargedRes.body.count, 1);
+      assert.equal(chargedRes.body.events[0].subscription.name, 'Netflix');
+
+      const scheduledRes = await request(app).get('/api/renewals').query({ month: '2026-10', status: 'scheduled' });
+      assert.equal(scheduledRes.status, 200);
+      assert.equal(scheduledRes.body.count, 3);
+    });
   });
 
   describe('GET /api/renewals/summary', () => {

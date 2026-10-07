@@ -138,4 +138,20 @@ describe('App', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Renewal service unavailable');
   });
+
+  test('filters renewal history by status', async () => {
+    api.fetchRenewalHistory.mockImplementation(async (month, options = {}) => {
+      const names = options.status === 'failed' ? ['FailedSub'] : ['SuccessSub', 'FailedSub'];
+      return historyFor(month, names);
+    });
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    expect(await screen.findByText('SuccessSub')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Status'), 'failed');
+
+    expect(api.fetchRenewalHistory).toHaveBeenCalledWith('2026-10', expect.objectContaining({ status: 'failed', page: 1 }));
+    expect(await screen.findByText('FailedSub')).toBeInTheDocument();
+  });
 });

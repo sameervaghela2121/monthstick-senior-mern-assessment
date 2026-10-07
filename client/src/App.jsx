@@ -13,6 +13,7 @@ export default function App({ initialMonth = currentMonth() }) {
   const [months] = useState(() => monthOptions(initialMonth));
   const [month, setMonth] = useState(initialMonth);
   const [page, setPage] = useState(1);
+  const [status, setStatus] = useState('');
   const [history, setHistory] = useState({ events: [], count: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState(null);
@@ -27,7 +28,7 @@ export default function App({ initialMonth = currentMonth() }) {
     let ignore = false;
     setLoading(true);
 
-    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE })
+    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE, status })
       .then((data) => {
         if (!ignore) {
           setHistory(data);
@@ -45,9 +46,9 @@ export default function App({ initialMonth = currentMonth() }) {
       });
 
     return () => {
-      ignore = true; // Discard results if month/page changes before request completes
+      ignore = true; // Discard results if month/page/status changes before request completes
     };
-  }, [month, page, refreshCount]);
+  }, [month, page, status, refreshCount]);
 
 
   useEffect(() => {
@@ -75,12 +76,6 @@ export default function App({ initialMonth = currentMonth() }) {
     };
   }, [month, refreshCount]);
 
-  // useEffect(() => {
-  //   setInterval(() => {
-  //     fetchSummary(month).then(setSummary);
-  //   }, SUMMARY_POLL_MS);
-  // }, []);
-
   async function runAction(action, onResult) {
     setBusy(true);
     setActionError(null);
@@ -103,6 +98,21 @@ export default function App({ initialMonth = currentMonth() }) {
             setMonth(newMonth);
             setPage(1); // Reset to first page when changing month
           }} />
+          <label className="month-picker">
+            Status
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1); // Reset to first page when changing status filter
+              }}
+            >
+              <option value="">All</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="charged">Charged</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
           <button type="button" onClick={() => runAction(runRenewals, setRunSummary)}>
             Run renewals
           </button>

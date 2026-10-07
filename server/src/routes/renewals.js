@@ -204,27 +204,65 @@ router.post('/retry-failed', async (req, res, next) => {
     if (!isValidMonth(month)) {
       return res.status(400).json({ error: { message: 'Invalid or missing month. Expected format YYYY-MM.' } });
     }
-    const failed = await RenewalEvent.find({ billingMonth: month, status: 'failed' });
 
-    failed.forEach(async (event) => {
-      const result = await paymentGateway.charge({
-        eventId: String(event._id),
-        amount: event.amount,
-        currency: event.currency,
-      });
+    const failedEvents = await RenewalEvent.find({ billingMonth: month, status: 'failed' });
+    let chargedCount = 0;
+    let failedCount = 0;
 
-      event.attempts += 1;
-      if (result.ok) {
-        event.status = 'charged';
-        event.chargedAt = new Date();
-        event.failureReason = undefined;
-      } else {
-        event.failureReason = result.reason;
+    // Concurrency limit of 3 (payment gateway limit is 4)
+    const CONCURRENCY_LIMIT = 3;
+    const queue = [...failedEvents];
+
+    async function processEvent(event) {
+      const nextAttempt = event.attempts + 1;
+      const idempotencyKey = `retry-${event._id}-${nextAttempt}`;
+
+      try {
+        const result = await paymentGateway.charge({
+          eventId: String(event._id),
+          amount: event.amount,
+          currency: event.currency,
+          idempotencyKey,
+        });
+
+        event.attempts = nextAttempt;
+        if (result.ok) {
+          event.status = 'charged';
+          event.chargedAt = new Date();
+          event.failureReason = undefined;
+          chargedCount++;
+        } else {
+          event.status = 'failed';
+          event.failureReason = result.reason || 'declined';
+          failedCount++;
+        }
+      } catch (err) {
+        // Gateway transport or 429 errors count as a recorded failed attempt
+        event.attempts = nextAttempt;
+        event.status = 'failed';
+        event.failureReason = err.message || 'gateway_error';
+        failedCount++;
       }
       await event.save();
+    }
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY_LIMIT, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const event = queue.shift();
+        if (event) {
+          await processEvent(event);
+        }
+      }
     });
 
-    res.json({ month, retried: failed.length });
+    await Promise.all(workers);
+
+    res.json({
+      month,
+      retried: failedEvents.length,
+      charged: chargedCount,
+      failed: failedCount,
+    });
   } catch (err) {
     next(err);
   }
