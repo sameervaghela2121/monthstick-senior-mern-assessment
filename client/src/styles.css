@@ -68,6 +68,10 @@ button:disabled {
   color: #9b1c1c;
 }
 
+.error-banner .retry {
+  margin-left: 12px;
+}
+
 .run-summary {
   margin-top: 16px;
   color: #3e4c59;

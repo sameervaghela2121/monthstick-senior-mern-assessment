@@ -11,8 +11,8 @@ async function request(path, options = {}) {
   return body;
 }
 
-export function fetchRenewalHistory(month) {
-  return request(`/renewals?month=${encodeURIComponent(month)}`);
+export function fetchRenewalHistory(month, { signal } = {}) {
+  return request(`/renewals?month=${encodeURIComponent(month)}`, { signal });
 }
 
 export function runRenewals(month) {

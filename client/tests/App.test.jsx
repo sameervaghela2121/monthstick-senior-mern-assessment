@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../src/App.jsx';
 import * as api from '../src/api.js';
@@ -84,5 +84,79 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Run renewals' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Renewal service unavailable');
+  });
+
+  test('a slow response for a previous month never replaces the selected month', async () => {
+    const pending = {};
+    api.fetchRenewalHistory.mockImplementation((month) => new Promise((resolve) => (pending[month] = resolve)));
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+
+    // November answers first, then the stale October request finishes late.
+    await act(async () => pending['2026-11'](historyFor('2026-11', ['Spotify'])));
+    await act(async () => pending['2026-10'](historyFor('2026-10', ['Netflix'])));
+
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
+    expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /November 2026/ })).toBeInTheDocument();
+  });
+
+  test('aborts the previous request when the month changes', async () => {
+    api.fetchRenewalHistory.mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+
+    const [octoberCall, novemberCall] = api.fetchRenewalHistory.mock.calls;
+    expect(octoberCall[1].signal.aborted).toBe(true);
+    expect(novemberCall[1].signal.aborted).toBe(false);
+  });
+
+  test('does not show the previous month while the new month is loading', async () => {
+    api.fetchRenewalHistory
+      .mockResolvedValueOnce(historyFor('2026-10', ['Netflix']))
+      .mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await screen.findByText('Netflix');
+
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+
+    expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No renewal events/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Loading renewal history/)).toBeInTheDocument();
+  });
+
+  test('shows an error with a retry when loading history fails', async () => {
+    api.fetchRenewalHistory
+      .mockRejectedValueOnce(new Error('Internal Server Error'))
+      .mockResolvedValue(historyFor('2026-10', ['Netflix']));
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load renewal history: Internal Server Error');
+    expect(screen.queryByText(/No renewal events/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Netflix')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('disables the run button while a run is in progress', async () => {
+    api.fetchRenewalHistory.mockResolvedValue(historyFor('2026-10', []));
+    api.runRenewals.mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
+
+    render(<App initialMonth="2026-10" />);
+    await user.click(screen.getByRole('button', { name: 'Run renewals' }));
+
+    expect(screen.getByRole('button', { name: 'Running…' })).toBeDisabled();
+    expect(api.runRenewals).toHaveBeenCalledTimes(1);
   });
 });

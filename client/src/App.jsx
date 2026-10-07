@@ -1,29 +1,38 @@
-import { useEffect, useState } from 'react';
-import { fetchRenewalHistory, runRenewals } from './api.js';
+import { useState } from 'react';
+import { runRenewals } from './api.js';
 import MonthPicker from './components/MonthPicker.jsx';
 import RenewalHistoryTable from './components/RenewalHistoryTable.jsx';
 import RunSummary from './components/RunSummary.jsx';
 import ErrorBanner from './components/ErrorBanner.jsx';
+import { useRenewalHistory } from './hooks/useRenewalHistory.js';
 import { currentMonth, formatMonth, monthOptions } from './utils/months.js';
+
+function RenewalHistory({ history }) {
+  const { status, events, error, reload } = history;
+
+  if (status === 'error') {
+    return <ErrorBanner message={`Could not load renewal history: ${error}`} onRetry={reload} />;
+  }
+  // Never fall through to the "no renewal events" empty state while we don't know the answer yet.
+  if (status === 'loading' && events.length === 0) {
+    return <p className="loading">Loading renewal history…</p>;
+  }
+  return (
+    <>
+      {status === 'loading' && <p className="loading">Refreshing…</p>}
+      <RenewalHistoryTable events={events} />
+    </>
+  );
+}
 
 export default function App({ initialMonth = currentMonth() }) {
   const [months] = useState(() => monthOptions(initialMonth));
   const [month, setMonth] = useState(initialMonth);
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshCount, setRefreshCount] = useState(0);
+  const history = useRenewalHistory(month);
 
   const [running, setRunning] = useState(false);
   const [runSummary, setRunSummary] = useState(null);
   const [runError, setRunError] = useState(null);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchRenewalHistory(month).then((data) => {
-      setEvents(data.events);
-      setLoading(false);
-    });
-  }, [month, refreshCount]);
 
   async function handleRunRenewals() {
     setRunning(true);
@@ -31,7 +40,7 @@ export default function App({ initialMonth = currentMonth() }) {
     try {
       const summary = await runRenewals(month);
       setRunSummary(summary);
-      setRefreshCount((count) => count + 1);
+      history.reload();
     } catch (err) {
       setRunError(err.message);
     } finally {
@@ -45,7 +54,8 @@ export default function App({ initialMonth = currentMonth() }) {
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
           <MonthPicker value={month} options={months} onChange={setMonth} />
-          <button type="button" onClick={handleRunRenewals}>
+          {/* Disabling avoids accidental double submits; the server stays idempotent regardless. */}
+          <button type="button" onClick={handleRunRenewals} disabled={running}>
             {running ? 'Running…' : 'Run renewals'}
           </button>
         </div>
@@ -54,10 +64,9 @@ export default function App({ initialMonth = currentMonth() }) {
       <ErrorBanner message={runError} />
       <RunSummary summary={runSummary} />
 
-      <section aria-labelledby="history-heading">
+      <section aria-labelledby="history-heading" aria-busy={history.status === 'loading'}>
         <h2 id="history-heading">Renewal history: {formatMonth(month)}</h2>
-        {loading && <p className="loading">Loading renewal history…</p>}
-        <RenewalHistoryTable events={events} />
+        <RenewalHistory history={history} />
       </section>
     </main>
   );
