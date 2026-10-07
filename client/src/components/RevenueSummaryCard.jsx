@@ -18,7 +18,7 @@ export default function RevenueSummaryCard({ summary }) {
       </div>
       <div>
         <span className="summary-label">Events</span>
-        <span data-testid="summary-counts">
+        <span data-testid="summary-counts" className="summary-counts">
           {summary.eventCount} ({summary.byStatus.charged} charged, {summary.byStatus.failed} failed,{' '}
           {summary.byStatus.scheduled} scheduled)
         </span>

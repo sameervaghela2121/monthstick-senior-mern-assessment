@@ -126,10 +126,20 @@ export default function App({ initialMonth = currentMonth() }) {
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
           <MonthPicker value={month} options={months} onChange={changeMonth} />
-          <button type="button" disabled={busy} onClick={() => runAction(runRenewals, setRunSummary)}>
+          <button
+            type="button"
+            className="button-primary"
+            disabled={busy}
+            onClick={() => runAction(runRenewals, setRunSummary)}
+          >
             Run renewals
           </button>
-          <button type="button" disabled={busy} onClick={() => runAction(retryFailedCharges, setRetryResult)}>
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={busy}
+            onClick={() => runAction(retryFailedCharges, setRetryResult)}
+          >
             Retry failed charges
           </button>
         </div>
@@ -147,7 +157,7 @@ export default function App({ initialMonth = currentMonth() }) {
         </p>
       )}
 
-      <section aria-labelledby="history-heading" aria-busy={historyLoading}>
+      <section className="history-section" aria-labelledby="history-heading" aria-busy={historyLoading}>
         <div className="history-header">
           <h2 id="history-heading">Renewal history: {formatMonth(month)}</h2>
           <StatusFilter value={status} onChange={changeStatus} />

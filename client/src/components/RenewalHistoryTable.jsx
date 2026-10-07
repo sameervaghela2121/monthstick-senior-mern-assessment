@@ -10,34 +10,36 @@ export default function RenewalHistoryTable({ events, status = '' }) {
   }
 
   return (
-    <table className="history">
-      <thead>
-        <tr>
-          <th>Subscription</th>
-          <th>Plan</th>
-          <th>Cycle</th>
-          <th>Amount</th>
-          <th>Status</th>
-          <th>Attempts</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody>
-        {events.map((event) => (
-          <tr key={event.id}>
-            <td>{event.subscription?.name ?? 'Deleted subscription'}</td>
-            <td>{event.subscription?.plan}</td>
-            <td>{event.subscription?.billingCycle}</td>
-            <td>{formatAmount(event.amount, event.currency)}</td>
-            <td>
-              {event.status}
-              {event.failureReason && <span className="failure-reason"> ({event.failureReason})</span>}
-            </td>
-            <td>{event.attempts}</td>
-            <td>{new Date(event.createdAt).toLocaleString()}</td>
+    <div className="table-wrap">
+      <table className="history">
+        <thead>
+          <tr>
+            <th>Subscription</th>
+            <th>Plan</th>
+            <th>Cycle</th>
+            <th className="numeric">Amount</th>
+            <th>Status</th>
+            <th className="numeric">Attempts</th>
+            <th>Created</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {events.map((event) => (
+            <tr key={event.id}>
+              <td>{event.subscription?.name ?? 'Deleted subscription'}</td>
+              <td>{event.subscription?.plan}</td>
+              <td>{event.subscription?.billingCycle}</td>
+              <td className="numeric">{formatAmount(event.amount, event.currency)}</td>
+              <td>
+                <span className={`badge badge-${event.status}`}>{event.status}</span>
+                {event.failureReason && <span className="failure-reason"> ({event.failureReason})</span>}
+              </td>
+              <td className="numeric">{event.attempts}</td>
+              <td>{new Date(event.createdAt).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
