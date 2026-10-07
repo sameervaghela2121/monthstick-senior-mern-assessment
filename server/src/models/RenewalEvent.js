@@ -17,4 +17,22 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Ensure at most one renewal event per subscription per billing month
+renewalEventSchema.index(
+  { subscription: 1, billingMonth: 1 },
+  { unique: true, name: 'uniq_subscription_billing_month' },
+);
+
+// Optimize history queries: index for filtering and sorting by month
+renewalEventSchema.index(
+  { billingMonth: 1, createdAt: 1 },
+  { name: 'idx_billing_month_created' },
+);
+
+// Optimize filtered history queries: compound index for month, status, and sorting
+renewalEventSchema.index(
+  { billingMonth: 1, status: 1, createdAt: 1 },
+  { name: 'idx_billing_month_status_created' },
+);
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);

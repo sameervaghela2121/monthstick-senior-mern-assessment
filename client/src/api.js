@@ -11,8 +11,11 @@ async function request(path, options = {}) {
   return body;
 }
 
-export function fetchRenewalHistory(month, { page = 1, pageSize = 25 } = {}) {
+export function fetchRenewalHistory(month, { page = 1, pageSize = 25, status = '' } = {}) {
   const params = new URLSearchParams({ month, page: String(page), pageSize: String(pageSize) });
+  if (status) {
+    params.append('status', status);
+  }
   return request(`/renewals?${params}`);
 }
 

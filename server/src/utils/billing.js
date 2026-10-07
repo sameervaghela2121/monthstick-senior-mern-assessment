@@ -1,13 +1,17 @@
 function getMonthRange(month) {
   const [year, monthNumber] = month.split('-').map(Number);
+  // Create dates in UTC, not local timezone
+  // Business rule: "Dates and months are UTC"
   return {
-    start: new Date(year, monthNumber - 1, 1),
-    end: new Date(year, monthNumber, 1),
+    start: new Date(Date.UTC(year, monthNumber - 1, 1)),
+    end: new Date(Date.UTC(year, monthNumber, 1)),
   };
 }
 
 function toMonthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  // Convert to UTC month key
+  const utcDate = new Date(date);
+  return `${utcDate.getUTCFullYear()}-${String(utcDate.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 function isDueInMonth(subscription, month) {

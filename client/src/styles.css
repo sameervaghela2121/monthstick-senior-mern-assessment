@@ -68,6 +68,15 @@ button:disabled {
   color: #9b1c1c;
 }
 
+.info-banner {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border-left: 4px solid #0369a1;
+}
+
 .run-summary {
   margin-top: 16px;
   color: #3e4c59;
