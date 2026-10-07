@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchRenewalHistory, fetchSummary, retryFailedCharges, runRenewals } from './api.js';
+import { fetchRenewalHistory, runRenewals } from './api.js';
 import MonthPicker from './components/MonthPicker.jsx';
 import RenewalHistoryTable from './components/RenewalHistoryTable.jsx';
 import RevenueSummaryCard from './components/RevenueSummaryCard.jsx';
@@ -21,6 +22,7 @@ export default function App({ initialMonth = currentMonth() }) {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
+  const historyRequestRef = useRef(0);
 
   const historyRequestId = useRef(0);
   const summaryRequestId = useRef(0);

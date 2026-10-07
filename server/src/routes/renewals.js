@@ -4,6 +4,7 @@ const { Subscription, RenewalEvent } = require('../models');
 const { getMonthRange, isDueInMonth, parseMonth } = require('../utils/billing');
 const { getRevenueSummary, clearSummaryCache } = require('../services/revenueSummary');
 const { paymentGateway, MAX_CONCURRENT_CHARGES } = require('../services/paymentGateway');
+const { isValidMonth } = require('../utils/billing');
 
 const router = express.Router();
 
@@ -193,16 +194,25 @@ function toHistoryItem(event, subscription) {
   };
 }
 
+function validateMonth(month) {
+  if (!isValidMonth(month)) {
+    const error = new Error('Invalid month. Expected YYYY-MM, for example 2026-10.');
+    error.status = 400;
+    throw error;
+  }
+}
+
 // POST /api/renewals/run  { "month": "YYYY-MM" }
 router.post('/run', async (req, res, next) => {
   try {
     const month = req.body?.month;
     parseMonth(month);
     const { end } = getMonthRange(month);
-
-    const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } });
+    const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } }).lean();
     const due = subscriptions.filter((subscription) => isDueInMonth(subscription, month));
 
+    let createdCount = 0;
+    let existingCount = 0;
     const created = [];
     const existing = [];
     for (const subscription of due) {
