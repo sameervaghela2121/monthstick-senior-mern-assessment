@@ -1,13 +1,16 @@
+// Billing months are UTC (business rule 1). Everything here uses the UTC date APIs so the result
+// does not depend on the timezone of the machine the server runs on.
+
 function getMonthRange(month) {
   const [year, monthNumber] = month.split('-').map(Number);
   return {
-    start: new Date(year, monthNumber - 1, 1),
-    end: new Date(year, monthNumber, 1),
+    start: new Date(Date.UTC(year, monthNumber - 1, 1)),
+    end: new Date(Date.UTC(year, monthNumber, 1)),
   };
 }
 
 function toMonthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 function isDueInMonth(subscription, month) {

@@ -33,10 +33,24 @@ h1 {
   gap: 12px;
 }
 
-.month-picker {
+.month-picker,
+.status-filter {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.history-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-error {
+  color: #9b1c1c;
+  font-size: 0.85rem;
 }
 
 select,

@@ -1,8 +1,12 @@
 import { formatAmount } from '../utils/months.js';
 
-export default function RenewalHistoryTable({ events }) {
+export default function RenewalHistoryTable({ events, status = '' }) {
   if (events.length === 0) {
-    return <p className="empty">No renewal events for this month yet.</p>;
+    return (
+      <p className="empty">
+        {status ? `No renewal events with status "${status}" for this month.` : 'No renewal events for this month yet.'}
+      </p>
+    );
   }
 
   return (
