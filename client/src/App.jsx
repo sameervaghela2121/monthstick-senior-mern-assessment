@@ -11,6 +11,7 @@ export default function App({ initialMonth = currentMonth() }) {
   const [month, setMonth] = useState(initialMonth);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
 
   const [running, setRunning] = useState(false);
@@ -18,11 +19,28 @@ export default function App({ initialMonth = currentMonth() }) {
   const [runError, setRunError] = useState(null);
 
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
-    fetchRenewalHistory(month).then((data) => {
-      setEvents(data.events);
-      setLoading(false);
-    });
+    setFetchError(null);
+    setEvents([]);
+
+    fetchRenewalHistory(month)
+      .then((data) => {
+        if (!ignore) {
+          setEvents(data.events);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setFetchError(err.message);
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, [month, refreshCount]);
 
   async function handleRunRenewals() {
@@ -56,8 +74,9 @@ export default function App({ initialMonth = currentMonth() }) {
 
       <section aria-labelledby="history-heading">
         <h2 id="history-heading">Renewal history: {formatMonth(month)}</h2>
+        <ErrorBanner message={fetchError} />
         {loading && <p className="loading">Loading renewal history…</p>}
-        <RenewalHistoryTable events={events} />
+        {!loading && !fetchError && <RenewalHistoryTable events={events} />}
       </section>
     </main>
   );

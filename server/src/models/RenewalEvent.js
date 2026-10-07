@@ -12,4 +12,10 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Enforce unique renewal events per subscription per month
+renewalEventSchema.index({ subscription: 1, billingMonth: 1 }, { unique: true });
+
+// Optimize history retrieval queries by month, sorted by creation date
+renewalEventSchema.index({ billingMonth: 1, createdAt: 1 });
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);
