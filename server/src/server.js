@@ -14,13 +14,27 @@ async function resolveMongoUri() {
   return mongod.getUri('monthstick');
 }
 
+// Indexes are built after startup data is in place, like a production deploy against existing data.
+// A failed index build must not take the API down, so it is logged and startup continues.
+async function ensureIndexes() {
+  for (const model of Object.values(mongoose.models)) {
+    try {
+      await model.createIndexes();
+    } catch (err) {
+      console.warn(`[startup] could not build indexes for ${model.modelName}: ${err.message}`);
+    }
+  }
+}
+
 async function main() {
+  mongoose.set('autoIndex', false);
   await mongoose.connect(await resolveMongoUri());
 
   if ((await Subscription.estimatedDocumentCount()) === 0) {
     await seedDatabase({ large: process.env.SEED_LARGE === 'true' });
-    console.log('Seeded sample data.');
+    console.log('Seeded sample data (a snapshot of production).');
   }
+  await ensureIndexes();
 
   createApp().listen(PORT, () => {
     console.log(`MonthStick API listening on http://localhost:${PORT}`);

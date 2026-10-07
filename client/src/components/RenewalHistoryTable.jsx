@@ -14,6 +14,7 @@ export default function RenewalHistoryTable({ events }) {
           <th>Cycle</th>
           <th>Amount</th>
           <th>Status</th>
+          <th>Attempts</th>
           <th>Created</th>
         </tr>
       </thead>
@@ -24,7 +25,11 @@ export default function RenewalHistoryTable({ events }) {
             <td>{event.subscription?.plan}</td>
             <td>{event.subscription?.billingCycle}</td>
             <td>{formatAmount(event.amount, event.currency)}</td>
-            <td>{event.status}</td>
+            <td>
+              {event.status}
+              {event.failureReason && <span className="failure-reason"> ({event.failureReason})</span>}
+            </td>
+            <td>{event.attempts}</td>
             <td>{new Date(event.createdAt).toLocaleString()}</td>
           </tr>
         ))}

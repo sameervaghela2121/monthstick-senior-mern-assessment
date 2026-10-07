@@ -1,41 +1,56 @@
 import { useEffect, useState } from 'react';
-import { fetchRenewalHistory, runRenewals } from './api.js';
+import { fetchRenewalHistory, fetchSummary, retryFailedCharges, runRenewals } from './api.js';
 import MonthPicker from './components/MonthPicker.jsx';
 import RenewalHistoryTable from './components/RenewalHistoryTable.jsx';
-import RunSummary from './components/RunSummary.jsx';
+import RevenueSummaryCard from './components/RevenueSummaryCard.jsx';
+import Pagination from './components/Pagination.jsx';
+import RunSummary, { RetrySummary } from './components/RunSummary.jsx';
 import ErrorBanner from './components/ErrorBanner.jsx';
+import { PAGE_SIZE, SUMMARY_POLL_MS } from './config.js';
 import { currentMonth, formatMonth, monthOptions } from './utils/months.js';
 
 export default function App({ initialMonth = currentMonth() }) {
   const [months] = useState(() => monthOptions(initialMonth));
   const [month, setMonth] = useState(initialMonth);
-  const [events, setEvents] = useState([]);
+  const [page, setPage] = useState(1);
+  const [history, setHistory] = useState({ events: [], count: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
+  const [summary, setSummary] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
 
-  const [running, setRunning] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [runSummary, setRunSummary] = useState(null);
-  const [runError, setRunError] = useState(null);
+  const [retryResult, setRetryResult] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
-    fetchRenewalHistory(month).then((data) => {
-      setEvents(data.events);
+    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE }).then((data) => {
+      setHistory(data);
       setLoading(false);
     });
+  }, [month, page, refreshCount]);
+
+  useEffect(() => {
+    fetchSummary(month).then(setSummary);
   }, [month, refreshCount]);
 
-  async function handleRunRenewals() {
-    setRunning(true);
-    setRunError(null);
+  useEffect(() => {
+    setInterval(() => {
+      fetchSummary(month).then(setSummary);
+    }, SUMMARY_POLL_MS);
+  }, []);
+
+  async function runAction(action, onResult) {
+    setBusy(true);
+    setActionError(null);
     try {
-      const summary = await runRenewals(month);
-      setRunSummary(summary);
+      onResult(await action(month));
       setRefreshCount((count) => count + 1);
     } catch (err) {
-      setRunError(err.message);
+      setActionError(err.message);
     } finally {
-      setRunning(false);
+      setBusy(false);
     }
   }
 
@@ -45,19 +60,27 @@ export default function App({ initialMonth = currentMonth() }) {
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
           <MonthPicker value={month} options={months} onChange={setMonth} />
-          <button type="button" onClick={handleRunRenewals}>
-            {running ? 'Running…' : 'Run renewals'}
+          <button type="button" onClick={() => runAction(runRenewals, setRunSummary)}>
+            Run renewals
+          </button>
+          <button type="button" onClick={() => runAction(retryFailedCharges, setRetryResult)}>
+            Retry failed charges
           </button>
         </div>
       </header>
 
-      <ErrorBanner message={runError} />
+      <ErrorBanner message={actionError} />
       <RunSummary summary={runSummary} />
+      <RetrySummary result={retryResult} />
+      {busy && <p className="loading">Working…</p>}
+
+      <RevenueSummaryCard summary={summary} />
 
       <section aria-labelledby="history-heading">
         <h2 id="history-heading">Renewal history: {formatMonth(month)}</h2>
         {loading && <p className="loading">Loading renewal history…</p>}
-        <RenewalHistoryTable events={events} />
+        <RenewalHistoryTable events={history.events} />
+        <Pagination page={page} totalPages={history.totalPages} onPageChange={setPage} />
       </section>
     </main>
   );

@@ -90,3 +90,37 @@ button:disabled {
   padding: 8px 12px;
   border-bottom: 1px solid #e4e7eb;
 }
+
+.summary-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 16px 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e4e7eb;
+}
+
+.summary-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  color: #616e7c;
+}
+
+.failure-reason {
+  color: #9b1c1c;
+  font-size: 0.85rem;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}

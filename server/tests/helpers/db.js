@@ -1,3 +1,6 @@
+// Run tests in UTC, like CI, regardless of the developer's machine.
+process.env.TZ = 'UTC';
+
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 require('../../src/models');

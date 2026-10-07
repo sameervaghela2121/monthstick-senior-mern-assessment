@@ -9,3 +9,13 @@ export default function RunSummary({ summary }) {
     </p>
   );
 }
+
+export function RetrySummary({ result }) {
+  if (!result) return null;
+  return (
+    <p className="run-summary" role="status">
+      Retried {result.retried} failed charge{result.retried === 1 ? '' : 's'}
+      {result.charged != null && `: ${result.charged} charged, ${result.failed} still failed`}.
+    </p>
+  );
+}

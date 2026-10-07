@@ -1,3 +1,6 @@
+// Run tests in UTC, like CI, regardless of the developer's machine.
+process.env.TZ = 'UTC';
+
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { getMonthRange, isDueInMonth } = require('../src/utils/billing');
@@ -5,7 +8,7 @@ const { getMonthRange, isDueInMonth } = require('../src/utils/billing');
 const sub = (billingCycle, startDate) => ({ billingCycle, startDate: new Date(`${startDate}T00:00:00Z`) });
 
 describe('billing utils', () => {
-  test('getMonthRange returns the UTC start of the month and the start of the next month', () => {
+  test('getMonthRange returns the start of the month and the start of the next month', () => {
     const { start, end } = getMonthRange('2026-12');
     assert.equal(start.toISOString(), '2026-12-01T00:00:00.000Z');
     assert.equal(end.toISOString(), '2027-01-01T00:00:00.000Z');
