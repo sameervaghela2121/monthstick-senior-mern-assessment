@@ -24,22 +24,62 @@ export default function App({ initialMonth = currentMonth() }) {
   const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
-    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE }).then((data) => {
-      setHistory(data);
-      setLoading(false);
-    });
+
+    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE })
+      .then((data) => {
+        if (!ignore) {
+          setHistory(data);
+        }
+      })
+      .catch((err) => {
+        if (!ignore) {
+          setActionError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true; // Discard results if month/page changes before request completes
+    };
   }, [month, page, refreshCount]);
 
-  useEffect(() => {
-    fetchSummary(month).then(setSummary);
-  }, [month, refreshCount]);
 
   useEffect(() => {
-    setInterval(() => {
-      fetchSummary(month).then(setSummary);
+    let ignore = false;
+
+    // Initial fetch for the selected month
+    fetchSummary(month)
+      .then((data) => {
+        if (!ignore) setSummary(data);
+      })
+      .catch(console.error);
+
+    // Periodic poll for status updates with cleanup
+    const intervalId = setInterval(() => {
+      fetchSummary(month)
+        .then((data) => {
+          if (!ignore) setSummary(data);
+        })
+        .catch(console.error);
     }, SUMMARY_POLL_MS);
-  }, []);
+
+    return () => {
+      ignore = true;
+      clearInterval(intervalId); // Clears old timer immediately when month changes
+    };
+  }, [month, refreshCount]);
+
+  // useEffect(() => {
+  //   setInterval(() => {
+  //     fetchSummary(month).then(setSummary);
+  //   }, SUMMARY_POLL_MS);
+  // }, []);
 
   async function runAction(action, onResult) {
     setBusy(true);
@@ -59,7 +99,10 @@ export default function App({ initialMonth = currentMonth() }) {
       <header>
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
-          <MonthPicker value={month} options={months} onChange={setMonth} />
+          <MonthPicker value={month} options={months} onChange={(newMonth) => {
+            setMonth(newMonth);
+            setPage(1); // Reset to first page when changing month
+          }} />
           <button type="button" onClick={() => runAction(runRenewals, setRunSummary)}>
             Run renewals
           </button>
