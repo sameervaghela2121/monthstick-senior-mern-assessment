@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { createApp } = require('./app');
 const { Subscription } = require('./models');
 const { seedDatabase } = require('../scripts/seedData');
+const { dedupeRenewalEvents } = require('../scripts/dedupeRenewals');
 
 const PORT = Number(process.env.PORT) || 4000;
 
@@ -34,6 +35,9 @@ async function main() {
     await seedDatabase({ large: process.env.SEED_LARGE === 'true' });
     console.log('Seeded sample data (a snapshot of production).');
   }
+  // The unique { subscription, billingMonth } index cannot build while duplicates exist, so archive
+  // them first. In production: deploy, run `npm run migrate:dedupe`, then build the index.
+  await dedupeRenewalEvents();
   await ensureIndexes();
 
   createApp().listen(PORT, () => {

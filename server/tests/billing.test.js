@@ -1,9 +1,9 @@
 // Run tests in UTC, like CI, regardless of the developer's machine.
 process.env.TZ = 'UTC';
 
-const { describe, test } = require('node:test');
+const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { getMonthRange, isDueInMonth } = require('../src/utils/billing');
+const { getMonthRange, isDueInMonth, toMonthKey } = require('../src/utils/billing');
 
 const sub = (billingCycle, startDate) => ({ billingCycle, startDate: new Date(`${startDate}T00:00:00Z`) });
 
@@ -24,5 +24,31 @@ describe('billing utils', () => {
     assert.equal(isDueInMonth(sub('yearly', '2024-10-03'), '2026-10'), true);
     assert.equal(isDueInMonth(sub('yearly', '2024-10-03'), '2026-11'), false);
     assert.equal(isDueInMonth(sub('yearly', '2026-10-03'), '2025-10'), false);
+  });
+});
+
+describe('billing utils outside UTC', () => {
+  let originalTz;
+  before(() => {
+    originalTz = process.env.TZ;
+    process.env.TZ = 'Asia/Kolkata';
+  });
+  after(() => {
+    process.env.TZ = originalTz;
+  });
+
+  test('billing month comes from startDate in UTC, not the server timezone', () => {
+    const canva = { billingCycle: 'monthly', startDate: new Date('2026-10-31T21:00:00Z') };
+    const spotify = { billingCycle: 'monthly', startDate: new Date('2026-11-01T00:00:00Z') };
+    assert.equal(toMonthKey(canva.startDate), '2026-10');
+    assert.equal(isDueInMonth(canva, '2026-10'), true);
+    assert.equal(isDueInMonth(spotify, '2026-10'), false);
+    assert.equal(isDueInMonth(spotify, '2026-11'), true);
+  });
+
+  test('getMonthRange is UTC-aligned', () => {
+    const { start, end } = getMonthRange('2026-10');
+    assert.equal(start.toISOString(), '2026-10-01T00:00:00.000Z');
+    assert.equal(end.toISOString(), '2026-11-01T00:00:00.000Z');
   });
 });
