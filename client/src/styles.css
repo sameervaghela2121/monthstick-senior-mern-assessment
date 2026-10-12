@@ -33,7 +33,8 @@ h1 {
   gap: 12px;
 }
 
-.month-picker {
+.month-picker,
+.status-filter {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -123,4 +124,10 @@ button:disabled {
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+}
+
+.summary-error {
+  margin: 16px 0;
+  color: #9b1c1c;
+  font-size: 0.9rem;
 }
