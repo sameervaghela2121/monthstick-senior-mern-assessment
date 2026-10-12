@@ -8,6 +8,7 @@
     "dev:large": "SEED_LARGE=true node --watch src/server.js",
     "start": "node src/server.js",
     "seed": "node scripts/seed.js",
+    "migrate:dedupe": "node scripts/dedupeRenewals.js",
     "test": "node --test --test-concurrency=1 --test-timeout=120000"
   },
   "dependencies": {

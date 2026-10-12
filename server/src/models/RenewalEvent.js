@@ -17,4 +17,11 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// At most one renewal event per subscription and billing month, enforced by the database.
+renewalEventSchema.index({ subscription: 1, billingMonth: 1 }, { unique: true });
+// History for a month in a stable order (createdAt, then _id as a tie-breaker) for paging.
+renewalEventSchema.index({ billingMonth: 1, createdAt: 1, _id: 1 });
+// History filtered by status, and the retry-failed lookup.
+renewalEventSchema.index({ billingMonth: 1, status: 1, createdAt: 1, _id: 1 });
+
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);
