@@ -8,6 +8,8 @@ const router = express.Router();
 
 const DEFAULT_PAGE_SIZE = 50;
 
+const RENEWAL_STATUSES = ['scheduled', 'charged', 'failed'];
+
 const ALLOWED_TRANSITIONS = {
   scheduled: ['charged', 'failed'],
   failed: ['charged', 'failed'],
@@ -37,52 +39,86 @@ function toHistoryItem(event, subscription) {
 }
 
 // POST /api/renewals/run  { "month": "YYYY-MM" }
+
 router.post('/run', async (req, res, next) => {
   try {
     const { month } = req.body;
     const { end } = getMonthRange(month);
 
-    const subscriptions = await Subscription.find({ status: 'active', startDate: { $lt: end } });
-    const due = subscriptions.filter((subscription) => isDueInMonth(subscription, month));
+    const subscriptions = await Subscription.find({
+      status: 'active',
+      startDate: { $lt: end },
+    });
 
-    // Checking before creating is safe here: Node runs JavaScript on a single thread, so two
-    // requests can never be inside this loop at the same time.
-    const created = [];
+    const due = subscriptions.filter((subscription) =>
+      isDueInMonth(subscription, month)
+    );
+
+    let createdCount = 0;
+    let alreadyExistedCount = 0;
+
     for (const subscription of due) {
-      const existing = await RenewalEvent.findOne({
-        subscription: subscription._id,
-        billingMonth: month,
-      });
-      if (existing) continue;
+      try {
+        await RenewalEvent.create({
+          subscription: subscription._id,
+          billingMonth: month,
+          amount: subscription.amount,
+          currency: subscription.currency,
+        });
 
-      const event = await RenewalEvent.create({
-        subscription: subscription._id,
-        billingMonth: month,
-        amount: subscription.amount,
-        currency: subscription.currency,
-      });
-      created.push(event);
+        createdCount += 1;
+      } catch (err) {
+        // A duplicate is expected when another request created
+        // the same event concurrently. Other DB errors must propagate.
+        if (err.code !== 11000) {
+          throw err;
+        }
+
+        const existing = await RenewalEvent.findOne({
+          subscription: subscription._id,
+          billingMonth: month,
+        });
+
+        if (!existing) {
+          // Do not silently swallow an unexpected database error.
+          throw err;
+        }
+
+        alreadyExistedCount += 1;
+      }
     }
 
-    res.status(201).json({
+    return res.status(200).json({
       month,
       dueCount: due.length,
-      createdCount: created.length,
+      createdCount,
+      alreadyExistedCount,
     });
   } catch (err) {
     next(err);
   }
 });
 
+
 // GET /api/renewals?month=YYYY-MM&page=1&pageSize=50
 router.get('/', async (req, res, next) => {
   try {
-    const { month } = req.query;
+    const { month, status } = req.query;
     const page = Number(req.query.page) || 1;
     const pageSize = Number(req.query.pageSize) || DEFAULT_PAGE_SIZE;
 
-    const count = await RenewalEvent.countDocuments({ billingMonth: month });
-    const events = await RenewalEvent.find({ billingMonth: month })
+    if (status !== undefined && !RENEWAL_STATUSES.includes(status)) {
+      return res.status(400).json({
+        error: { message: `status must be one of: ${RENEWAL_STATUSES.join(', ')}` },
+      });
+    }
+
+    // An absent status means "all"; a present one narrows the query at the database level
+    // so count, pagination and the returned rows all reflect the same filter.
+    const filter = { billingMonth: month, ...(status ? { status } : {}) };
+
+    const count = await RenewalEvent.countDocuments(filter);
+    const events = await RenewalEvent.find(filter)
       .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize);
@@ -98,7 +134,7 @@ router.get('/', async (req, res, next) => {
       count,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.floor(count / pageSize)),
+      totalPages: Math.max(1, Math.ceil(count / pageSize)),
       events: items,
     });
   } catch (err) {

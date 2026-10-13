@@ -17,4 +17,13 @@ const renewalEventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+renewalEventSchema.index(
+  { subscription: 1, billingMonth: 1 },
+  { unique: true }
+);
+
+// The history endpoint queries by billingMonth (optionally narrowed by status) and sorts by
+// createdAt. This compound index lets the filtered and unfiltered listings seek + sort from the
+// index instead of scanning a whole month as data grows.
+renewalEventSchema.index({ billingMonth: 1, status: 1, createdAt: 1 });
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);

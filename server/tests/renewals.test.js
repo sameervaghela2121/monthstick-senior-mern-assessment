@@ -107,6 +107,45 @@ describe('Renewals API', () => {
       assert.equal(res.body.count, 0);
       assert.deepEqual(res.body.events, []);
     });
+
+    test('filters events by status, and count reflects the filter', async () => {
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      const netflix = await eventFor('Netflix', '2026-10');
+      const figma = await eventFor('Figma', '2026-10');
+      await request(app).patch(`/api/renewals/${netflix._id}/status`).send({ status: 'charged' });
+      await request(app).patch(`/api/renewals/${figma._id}/status`).send({ status: 'failed' });
+
+      const charged = await request(app).get('/api/renewals').query({ month: '2026-10', status: 'charged' });
+      assert.equal(charged.status, 200);
+      assert.equal(charged.body.count, 1);
+      assert.equal(charged.body.events.length, 1);
+      assert.ok(charged.body.events.every((e) => e.status === 'charged'));
+
+      const failed = await request(app).get('/api/renewals').query({ month: '2026-10', status: 'failed' });
+      assert.equal(failed.body.count, 1);
+      assert.ok(failed.body.events.every((e) => e.status === 'failed'));
+
+      const all = await request(app).get('/api/renewals').query({ month: '2026-10' });
+      assert.equal(all.body.count, 4);
+    });
+
+    test('pagination reflects the status filter', async () => {
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      // All four events are still "scheduled" here.
+      const res = await request(app)
+        .get('/api/renewals')
+        .query({ month: '2026-10', status: 'scheduled', page: 1, pageSize: 2 });
+
+      assert.equal(res.body.count, 4);
+      assert.equal(res.body.events.length, 2);
+      assert.ok(res.body.events.every((e) => e.status === 'scheduled'));
+    });
+
+    test('rejects an invalid status with 400', async () => {
+      const res = await request(app).get('/api/renewals').query({ month: '2026-10', status: 'bogus' });
+      assert.equal(res.status, 400);
+      assert.ok(res.body.error.message);
+    });
   });
 
   describe('GET /api/renewals/summary', () => {

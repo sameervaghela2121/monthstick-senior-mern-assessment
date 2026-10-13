@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchRenewalHistory, fetchSummary, retryFailedCharges, runRenewals } from './api.js';
 import MonthPicker from './components/MonthPicker.jsx';
+import StatusFilter from './components/StatusFilter.jsx';
 import RenewalHistoryTable from './components/RenewalHistoryTable.jsx';
 import RevenueSummaryCard from './components/RevenueSummaryCard.jsx';
 import Pagination from './components/Pagination.jsx';
@@ -12,9 +13,20 @@ import { currentMonth, formatMonth, monthOptions } from './utils/months.js';
 export default function App({ initialMonth = currentMonth() }) {
   const [months] = useState(() => monthOptions(initialMonth));
   const [month, setMonth] = useState(initialMonth);
+  const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [history, setHistory] = useState({ events: [], count: 0, totalPages: 1 });
   const [loading, setLoading] = useState(false);
+
+  // Changing the month or the status filter must start again from page 1.
+  function changeMonth(next) {
+    setMonth(next);
+    setPage(1);
+  }
+  function changeStatus(next) {
+    setStatus(next);
+    setPage(1);
+  }
   const [summary, setSummary] = useState(null);
   const [refreshCount, setRefreshCount] = useState(0);
 
@@ -24,12 +36,25 @@ export default function App({ initialMonth = currentMonth() }) {
   const [actionError, setActionError] = useState(null);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE }).then((data) => {
-      setHistory(data);
-      setLoading(false);
-    });
-  }, [month, page, refreshCount]);
+    fetchRenewalHistory(month, { page, pageSize: PAGE_SIZE, status })
+      .then((data) => {
+        // Ignore a response that resolves after the selection has already changed,
+        // so a slow request for an old month/status cannot overwrite current data.
+        if (!active) return;
+        setHistory(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setHistory({ events: [], count: 0, totalPages: 1 });
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [month, status, page, refreshCount]);
 
   useEffect(() => {
     fetchSummary(month).then(setSummary);
@@ -59,7 +84,8 @@ export default function App({ initialMonth = currentMonth() }) {
       <header>
         <h1>MonthStick Renewal Console</h1>
         <div className="toolbar">
-          <MonthPicker value={month} options={months} onChange={setMonth} />
+          <MonthPicker value={month} options={months} onChange={changeMonth} />
+          <StatusFilter value={status} onChange={changeStatus} />
           <button type="button" onClick={() => runAction(runRenewals, setRunSummary)}>
             Run renewals
           </button>
