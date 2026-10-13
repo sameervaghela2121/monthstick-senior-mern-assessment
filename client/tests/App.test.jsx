@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../src/App.jsx';
 import * as api from '../src/api.js';
@@ -77,6 +77,93 @@ describe('App', () => {
 
     expect(await screen.findByText('Spotify')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /November 2026/ })).toBeInTheDocument();
+  });
+
+  test('ignores a late history response for a previously selected month', async () => {
+    let resolveOctober;
+    api.fetchRenewalHistory.mockImplementation((month) => {
+      if (month === '2026-10') {
+        return new Promise((resolve) => {
+          resolveOctober = resolve;
+        });
+      }
+      return Promise.resolve(historyFor(month, ['Spotify']));
+    });
+    const user = userEvent.setup();
+    render(<App initialMonth="2026-10" />);
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+    expect(await screen.findByText('Spotify')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOctober(historyFor('2026-10', ['Netflix']));
+    });
+    expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
+  });
+
+  test('ignores old summary responses and stops polling when unmounted', async () => {
+    let resolveOctober;
+    api.fetchRenewalHistory.mockImplementation(async (month) => historyFor(month, []));
+    api.fetchSummary.mockImplementation((month) => {
+      if (month === '2026-10') {
+        return new Promise((resolve) => {
+          resolveOctober = resolve;
+        });
+      }
+      return Promise.resolve(summaryFor(month, 22200));
+    });
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const user = userEvent.setup();
+    const view = render(<App initialMonth="2026-10" />);
+
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+    expect(await screen.findByTestId('summary-total')).toHaveTextContent('$222.00');
+    await act(async () => {
+      resolveOctober(summaryFor('2026-10', 12345));
+    });
+    expect(screen.getByTestId('summary-total')).toHaveTextContent('$222.00');
+
+    const interval = intervalSpy.mock.results[0].value;
+    view.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
+    intervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  });
+
+  test('changing status filters from page one and requests the selected filter', async () => {
+    api.fetchRenewalHistory.mockImplementation(async (month, options = {}) =>
+      historyFor(month, [`Customer ${options.page}`], { page: options.page, totalPages: 3 }),
+    );
+    const user = userEvent.setup();
+    render(<App initialMonth="2026-09" />);
+    await screen.findByText('Customer 1');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Customer 2')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Status'), 'failed');
+
+    expect(await screen.findByText('Customer 1')).toBeInTheDocument();
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
+    expect(api.fetchRenewalHistory).toHaveBeenLastCalledWith(
+      '2026-09',
+      expect.objectContaining({ page: 1, status: 'failed' }),
+    );
+  });
+
+  test('shows history API errors instead of leaving old results visible', async () => {
+    api.fetchRenewalHistory.mockImplementation((month) => {
+      if (month === '2026-11') return Promise.reject(new Error('History unavailable'));
+      return Promise.resolve(historyFor(month, ['Netflix']));
+    });
+    const user = userEvent.setup();
+    render(<App initialMonth="2026-10" />);
+    expect(await screen.findByText('Netflix')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Billing month'), '2026-11');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('History unavailable');
+    expect(screen.queryByText('Netflix')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No renewal events/)).not.toBeInTheDocument();
   });
 
   test('requests the next page of history', async () => {

@@ -11,13 +11,14 @@ async function request(path, options = {}) {
   return body;
 }
 
-export function fetchRenewalHistory(month, { page = 1, pageSize = 25 } = {}) {
+export function fetchRenewalHistory(month, { page = 1, pageSize = 25, status = '', signal } = {}) {
   const params = new URLSearchParams({ month, page: String(page), pageSize: String(pageSize) });
-  return request(`/renewals?${params}`);
+  if (status) params.set('status', status);
+  return request(`/renewals?${params}`, { signal });
 }
 
-export function fetchSummary(month) {
-  return request(`/renewals/summary?month=${encodeURIComponent(month)}`);
+export function fetchSummary(month, { signal } = {}) {
+  return request(`/renewals/summary?month=${encodeURIComponent(month)}`, { signal });
 }
 
 export function runRenewals(month) {

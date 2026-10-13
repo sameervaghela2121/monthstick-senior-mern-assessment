@@ -185,11 +185,11 @@ client/                          React dashboard (Vite, Vitest + Testing Library
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/renewals/run` | Body `{ "month": "YYYY-MM" }`. Creates renewal events for active subscriptions due that month and returns a run summary. |
-| `GET` | `/api/renewals?month=YYYY-MM&page=1&pageSize=50` | One page of history: `{ month, count, page, pageSize, totalPages, events: [{ id, billingMonth, amount, currency, status, attempts, failureReason, chargedAt, createdAt, subscription: { id, name, plan, billingCycle } }] }` |
+| `POST` | `/api/renewals/run` | Body `{ "month": "YYYY-MM" }`. Creates renewal events for active subscriptions due that month and returns `{ month, dueCount, createdCount, alreadyExistedCount, created: [eventId], alreadyExisted: [eventId] }`. |
+| `GET` | `/api/renewals?month=YYYY-MM&page=1&pageSize=50&status=failed` | One page of history, optionally filtered by `scheduled`, `charged`, or `failed`; `pageSize` is capped at 200. Response: `{ month, count, page, pageSize, totalPages, events: [{ id, billingMonth, amount, currency, status, attempts, failureReason, chargedAt, createdAt, subscription: { id, name, plan, billingCycle } }] }` |
 | `GET` | `/api/renewals/summary?month=YYYY-MM` | Revenue summary in cents: `{ month, eventCount, subtotal, tax, total, byStatus: { scheduled, charged, failed } }` |
-| `PATCH` | `/api/renewals/:id/status` | Payment webhook. Body `{ "status": "charged" \| "failed", "failureReason"?: string }`. Returns the updated event; `404` if unknown, `409` if the transition is not allowed. |
-| `POST` | `/api/renewals/retry-failed` | Body `{ "month": "YYYY-MM" }`. Retries every failed charge in the month and responds when all retries have finished: `{ month, retried, charged, failed }`. A gateway error counts as a failed attempt. |
+| `PATCH` | `/api/renewals/:id/status` | Payment webhook. Body `{ "status": "charged" \| "failed", "attemptId": string, "failureReason"?: string }`. The stable provider attempt ID is required to make webhook delivery idempotent. Returns the updated event; `404` if unknown, `409` if the transition is not allowed. |
+| `POST` | `/api/renewals/retry-failed` | Body `{ "month": "YYYY-MM" }`. Retries failed charges with at most four concurrent gateway requests and responds after completion: `{ month, retried, charged, failed }`. Gateway transport errors are returned as errors; an uncertain attempt retains its idempotency key for safe recovery. |
 | `GET` | `/api/subscriptions` | All subscriptions |
 | `GET` | `/api/health` | Health check |
 
@@ -207,6 +207,21 @@ client/                          React dashboard (Vite, Vitest + Testing Library
 | Adobe Creative Cloud | monthly | **cancelled** | 2024-03-12 | | |
 
 August and September 2026 already contain renewal history, including some failed charges.
+
+### Renewal uniqueness rollout
+
+Renewal writes use the deterministic key `<subscriptionId>:<YYYY-MM>` and a MongoDB partial
+unique index on `(subscription, billingMonth)` for keyed records. This lets deployments create the
+index while the production snapshot still contains historical duplicate rows. The route checks for any
+existing event for the pair before creating a keyed event, and concurrent creates are protected
+by the database index.
+
+Before backfilling keys onto legacy production events, reconcile duplicate groups against payment
+provider and invoice records with Finance/Operations. Do not automatically delete or merge charged
+history: retain an audit trail and decide which event represents each renewal. After reconciliation,
+backfill the deterministic key for the retained event in each pair, verify there are no duplicate
+keyed pairs, and then deploy/verify the unique index. The snapshot duplicates are intentionally
+left unchanged; unresolved legacy duplicate rows are not rewritten by application startup.
 
 ## Pull request requirements
 

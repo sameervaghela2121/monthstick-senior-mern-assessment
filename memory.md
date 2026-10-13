@@ -1,0 +1,15 @@
+Establish data and payment integrity first. Add a unique database index on (subscription, billingMonth) and make renewal creation safe under concurrent requests using atomic inserts/upserts. Return clear created-versus-existing results; treat only the expected duplicate-key race as an existing event, and surface other database errors.
+
+Rollout needs a data-reconciliation step: the assessment says production already contains duplicates. Before creating the unique index, audit duplicate groups and reconcile them against payment records. Preserve an audit trail; do not blindly delete financial history. Create and verify the index as a deliberate migration gate, since server.js currently logs index-build failures and continues startup.
+
+Correct billing calculations and cache behavior. Switch billing-month comparisons and month boundaries to UTC. Calculate 18% GST per event using integer-cent arithmetic with ties rounded to even, then sum event amounts and taxes. Invalidate the affected month’s summary cache after renewal creation, status changes, and completed retries.
+
+Make payment updates safe under retries and duplicate webhooks. Atomically claim work so concurrent retry requests cannot process the same event at once; persist a stable idempotency key for each logical charge attempt. Limit gateway calls to four concurrent requests, await their outcomes, and update event state conditionally so a late failure cannot revert a charged event. Deduplicate webhook deliveries using a provider event/attempt identifier where available, and keep charged final.
+
+Fix and extend the history API. Add shared validation for month format and validity, positive integer page/page size (maximum 200), allowed status values, event IDs, and status updates. Return clear 400 JSON errors for invalid input. Populate subscription details with only the fields the UI needs; use deterministic sorting and Math.ceil for page counts. Add indexes suited to month-only and month-plus-status queries, then implement the optional status filter so counts and pagination use the same filter.
+
+Make the dashboard reflect only current selections. In App.jsx, cancel or ignore obsolete history and summary responses, clear or hide old results while loading, and show request errors clearly. Tie the polling interval to the selected month and clean it up when the month changes or the component unmounts. Add the Status select; reset to page 1 when either month or status changes.
+
+Verify behavior with focused tests. Extend renewals.test.js for concurrent runs, duplicate-key behavior, validation, filtered pagination, UTC boundaries, per-event rounding, and retry/webhook races and concurrency. Extend App.test.jsx for reversed response order, loading/error states, filter-driven page resets, and polling cleanup. Then run the documented test suite and manually verify the renewal and filtering flows.
+
+This order prioritizes preventing duplicate events and charges, then correcting financial/date behavior, followed by API and UI improvements. I have not changed source files or manifests; this is the approach for review before implementation.

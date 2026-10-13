@@ -25,4 +25,20 @@ describe('billing utils', () => {
     assert.equal(isDueInMonth(sub('yearly', '2024-10-03'), '2026-11'), false);
     assert.equal(isDueInMonth(sub('yearly', '2026-10-03'), '2025-10'), false);
   });
+
+  test('billing month and month ranges use UTC regardless of server timezone', () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      const { start, end } = getMonthRange('2026-10');
+      assert.equal(start.toISOString(), '2026-10-01T00:00:00.000Z');
+      assert.equal(end.toISOString(), '2026-11-01T00:00:00.000Z');
+      assert.equal(
+        require('../src/utils/billing').toMonthKey(new Date('2026-11-01T01:00:00Z')),
+        '2026-11',
+      );
+    } finally {
+      process.env.TZ = originalTimezone;
+    }
+  });
 });

@@ -56,6 +56,25 @@ describe('Renewals API', () => {
       assert.ok(!names.includes("Gold's Gym"));
       assert.ok(!names.includes('Adobe Creative Cloud'));
     });
+
+    test('repeated and concurrent runs create one event per subscription and month', async () => {
+      const results = await Promise.all([
+        request(app).post('/api/renewals/run').send({ month: '2026-10' }),
+        request(app).post('/api/renewals/run').send({ month: '2026-10' }),
+      ]);
+
+      assert.equal(results[0].body.createdCount + results[1].body.createdCount, 4);
+      assert.equal(results[0].body.alreadyExistedCount + results[1].body.alreadyExistedCount, 4);
+      assert.equal(await RenewalEvent.countDocuments({ billingMonth: '2026-10' }), 4);
+      const uniqueKeys = await RenewalEvent.distinct('deduplicationKey');
+      assert.equal(uniqueKeys.length, 4);
+    });
+
+    test('rejects invalid renewal months with a useful bad-request response', async () => {
+      const res = await request(app).post('/api/renewals/run').send({ month: '2026-13' });
+      assert.equal(res.status, 400);
+      assert.match(res.body.error.message, /YYYY-MM/);
+    });
   });
 
   describe('GET /api/renewals', () => {
@@ -107,6 +126,41 @@ describe('Renewals API', () => {
       assert.equal(res.body.count, 0);
       assert.deepEqual(res.body.events, []);
     });
+
+    test('filters by status and calculates filtered page counts correctly', async () => {
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      await RenewalEvent.updateMany({ billingMonth: '2026-10' }, { $set: { status: 'failed' } });
+      const netflix = await eventFor('Netflix', '2026-10');
+      await RenewalEvent.updateOne({ _id: netflix._id }, { $set: { status: 'charged' } });
+
+      const first = await request(app)
+        .get('/api/renewals')
+        .query({ month: '2026-10', status: 'failed', pageSize: 2, page: 1 });
+      const second = await request(app)
+        .get('/api/renewals')
+        .query({ month: '2026-10', status: 'failed', pageSize: 2, page: 2 });
+
+      assert.equal(first.status, 200);
+      assert.equal(first.body.count, 3);
+      assert.equal(first.body.totalPages, 2);
+      assert.equal(first.body.events.length, 2);
+      assert.equal(second.body.events.length, 1);
+      assert.ok([...first.body.events, ...second.body.events].every((event) => event.status === 'failed'));
+    });
+
+    test('rejects invalid month, page, page size, and status inputs', async () => {
+      const cases = [
+        [{ month: '2026-00' }, /month/],
+        [{ month: '2026-10', page: '0' }, /page/],
+        [{ month: '2026-10', pageSize: '201' }, /pageSize/],
+        [{ month: '2026-10', status: 'pending' }, /status/],
+      ];
+      for (const [query, message] of cases) {
+        const res = await request(app).get('/api/renewals').query(query);
+        assert.equal(res.status, 400);
+        assert.match(res.body.error.message, message);
+      }
+    });
   });
 
   describe('GET /api/renewals/summary', () => {
@@ -123,6 +177,31 @@ describe('Renewals API', () => {
       assert.equal(typeof res.body.tax, 'number');
       assert.equal(typeof res.body.total, 'number');
     });
+
+    test('rounds GST per event using ties-to-even and refreshes cached summaries', async () => {
+      const subscription = await Subscription.findOne({ name: 'Netflix' });
+      await RenewalEvent.insertMany([
+        { subscription, billingMonth: '2026-12', amount: 25, currency: 'USD' },
+        { subscription, billingMonth: '2026-12', amount: 75, currency: 'USD' },
+        { subscription, billingMonth: '2026-12', amount: 125, currency: 'USD' },
+      ]);
+      const summary = await request(app).get('/api/renewals/summary').query({ month: '2026-12' });
+      assert.equal(summary.body.subtotal, 225);
+      assert.equal(summary.body.tax, 40);
+      assert.equal(summary.body.total, 265);
+
+      const empty = await request(app).get('/api/renewals/summary').query({ month: '2026-10' });
+      assert.equal(empty.body.eventCount, 0);
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      const before = await request(app).get('/api/renewals/summary').query({ month: '2026-10' });
+      const event = await eventFor('Netflix', '2026-10');
+      await request(app).patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'failed', attemptId: `tax-${event._id}` });
+      const after = await request(app).get('/api/renewals/summary').query({ month: '2026-10' });
+      assert.equal(before.body.byStatus.scheduled, 4);
+      assert.equal(after.body.byStatus.failed, 1);
+      assert.equal(after.body.byStatus.scheduled, 3);
+    });
   });
 
   describe('PATCH /api/renewals/:id/status', () => {
@@ -130,7 +209,8 @@ describe('Renewals API', () => {
       await request(app).post('/api/renewals/run').send({ month: '2026-10' });
       const event = await eventFor('Netflix', '2026-10');
 
-      const res = await request(app).patch(`/api/renewals/${event._id}/status`).send({ status: 'charged' });
+      const res = await request(app).patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'charged', attemptId: `success-${event._id}` });
 
       assert.equal(res.status, 200);
       assert.equal(res.body.status, 'charged');
@@ -144,7 +224,7 @@ describe('Renewals API', () => {
 
       const res = await request(app)
         .patch(`/api/renewals/${event._id}/status`)
-        .send({ status: 'failed', failureReason: 'insufficient_funds' });
+        .send({ status: 'failed', attemptId: `failure-${event._id}`, failureReason: 'insufficient_funds' });
 
       assert.equal(res.status, 200);
       assert.equal(res.body.status, 'failed');
@@ -154,9 +234,11 @@ describe('Renewals API', () => {
     test('rejects changing a charged event back to failed', async () => {
       await request(app).post('/api/renewals/run').send({ month: '2026-10' });
       const event = await eventFor('Netflix', '2026-10');
-      await request(app).patch(`/api/renewals/${event._id}/status`).send({ status: 'charged' });
+      await request(app).patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'charged', attemptId: `charged-${event._id}` });
 
-      const res = await request(app).patch(`/api/renewals/${event._id}/status`).send({ status: 'failed' });
+      const res = await request(app).patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'failed', attemptId: `late-failure-${event._id}` });
 
       assert.equal(res.status, 409);
       assert.ok(res.body.error);
@@ -165,8 +247,47 @@ describe('Renewals API', () => {
     test('returns 404 for an unknown event', async () => {
       const res = await request(app)
         .patch('/api/renewals/0123456789abcdef01234567/status')
-        .send({ status: 'charged' });
+        .send({ status: 'charged', attemptId: 'unknown-event-attempt' });
       assert.equal(res.status, 404);
+    });
+
+    test('deduplicates webhook attempts and keeps charged events final', async () => {
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      const event = await eventFor('Netflix', '2026-10');
+      const webhook = () => request(app)
+        .patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'failed', attemptId: 'provider-attempt-1', failureReason: 'declined' });
+
+      const first = await webhook();
+      const duplicate = await webhook();
+      assert.equal(first.body.attempts, 1);
+      assert.equal(duplicate.body.attempts, 1);
+
+      const charged = await request(app)
+        .patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'charged', attemptId: 'provider-attempt-2' });
+      assert.equal(charged.body.status, 'charged');
+      const lateFailure = await request(app)
+        .patch(`/api/renewals/${event._id}/status`)
+        .send({ status: 'failed', attemptId: 'provider-attempt-3' });
+      assert.equal(lateFailure.status, 409);
+
+      const saved = await RenewalEvent.findById(event._id);
+      assert.equal(saved.status, 'charged');
+      assert.equal(saved.attempts, 2);
+    });
+
+    test('rejects invalid event ids and status update values', async () => {
+      const invalidId = await request(app).patch('/api/renewals/not-an-id/status').send({ status: 'charged' });
+      const invalidStatus = await request(app)
+        .patch('/api/renewals/0123456789abcdef01234567/status')
+        .send({ status: 'pending', attemptId: 'invalid-status-attempt' });
+      assert.equal(invalidId.status, 400);
+      assert.equal(invalidStatus.status, 400);
+      const missingAttempt = await request(app)
+        .patch('/api/renewals/0123456789abcdef01234567/status')
+        .send({ status: 'charged' });
+      assert.equal(missingAttempt.status, 400);
     });
   });
 
@@ -180,6 +301,47 @@ describe('Renewals API', () => {
         assert.equal(res.status, 200);
         assert.equal(res.body.month, '2026-10');
         assert.equal(res.body.retried, 0);
+      } finally {
+        paymentGateway.charge = original;
+      }
+    });
+
+    test('concurrent retry requests claim each event once and await completion', async () => {
+      await Subscription.insertMany(Array.from({ length: 8 }, (_, index) => ({
+        name: `Additional ${index}`,
+        plan: 'Monthly',
+        amount: 500,
+        billingCycle: 'monthly',
+        status: 'active',
+        startDate: new Date('2026-01-01T00:00:00Z'),
+      })));
+      await request(app).post('/api/renewals/run').send({ month: '2026-10' });
+      await RenewalEvent.updateMany({ billingMonth: '2026-10' }, { $set: { status: 'failed' } });
+      const failedEvents = await RenewalEvent.find({ billingMonth: '2026-10' });
+
+      const original = paymentGateway.charge;
+      const calls = [];
+      let active = 0;
+      let maxActive = 0;
+      paymentGateway.charge = async (charge) => {
+        calls.push(charge);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { ok: true, chargeId: `charge-${charge.eventId}` };
+      };
+      try {
+        const results = await Promise.all([
+          request(app).post('/api/renewals/retry-failed').send({ month: '2026-10' }),
+          request(app).post('/api/renewals/retry-failed').send({ month: '2026-10' }),
+        ]);
+        assert.equal(results[0].body.retried + results[1].body.retried, failedEvents.length);
+        assert.equal(calls.length, failedEvents.length);
+        assert.ok(maxActive <= 4);
+        assert.ok(calls.every((call) => call.idempotencyKey));
+        const saved = await RenewalEvent.find({ _id: { $in: failedEvents.map((event) => event._id) } });
+        assert.ok(saved.every((event) => event.status === 'charged' && event.attempts === 1));
       } finally {
         paymentGateway.charge = original;
       }

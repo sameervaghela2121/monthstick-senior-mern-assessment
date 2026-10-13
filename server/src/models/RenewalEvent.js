@@ -5,6 +5,8 @@ const renewalEventSchema = new mongoose.Schema(
     subscription: { type: mongoose.Schema.Types.ObjectId, ref: 'Subscription', required: true },
     // Billing month in YYYY-MM format.
     billingMonth: { type: String, required: true },
+    // Stable application-generated key; legacy duplicate records remain unkeyed during migration.
+    deduplicationKey: { type: String },
     // Minor currency units (cents), excluding tax.
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: 'USD' },
@@ -13,8 +15,22 @@ const renewalEventSchema = new mongoose.Schema(
     attempts: { type: Number, default: 0, min: 0 },
     failureReason: { type: String },
     chargedAt: { type: Date },
+    retryClaimedAt: { type: Date },
+    retryAttemptKey: { type: String },
+    processedAttemptIds: { type: [String], default: undefined },
   },
   { timestamps: true },
 );
+
+renewalEventSchema.index(
+  { subscription: 1, billingMonth: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { deduplicationKey: { $exists: true } },
+  },
+);
+renewalEventSchema.index({ subscription: 1, billingMonth: 1, _id: 1 });
+renewalEventSchema.index({ billingMonth: 1, createdAt: 1, _id: 1 });
+renewalEventSchema.index({ billingMonth: 1, status: 1, createdAt: 1, _id: 1 });
 
 module.exports = mongoose.models.RenewalEvent || mongoose.model('RenewalEvent', renewalEventSchema);

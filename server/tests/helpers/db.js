@@ -4,6 +4,7 @@ process.env.TZ = 'UTC';
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 require('../../src/models');
+const { clearSummaryCache } = require('../../src/services/revenueSummary');
 
 let mongod;
 const commands = [];
@@ -16,6 +17,7 @@ async function startDatabase() {
 }
 
 async function resetDatabase() {
+  clearSummaryCache();
   await Promise.all(
     Object.values(mongoose.connection.collections).map((collection) => collection.deleteMany({})),
   );

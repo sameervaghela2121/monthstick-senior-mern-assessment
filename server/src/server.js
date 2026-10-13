@@ -14,15 +14,10 @@ async function resolveMongoUri() {
   return mongod.getUri('monthstick');
 }
 
-// Indexes are built after startup data is in place, like a production deploy against existing data.
-// A failed index build must not take the API down, so it is logged and startup continues.
+// Index creation is a startup gate: serving writes without the unique index would allow duplicates.
 async function ensureIndexes() {
   for (const model of Object.values(mongoose.models)) {
-    try {
-      await model.createIndexes();
-    } catch (err) {
-      console.warn(`[startup] could not build indexes for ${model.modelName}: ${err.message}`);
-    }
+    await model.createIndexes();
   }
 }
 
