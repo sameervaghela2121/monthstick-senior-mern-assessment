@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { createApp } = require('./app');
-const { Subscription } = require('./models');
+const { Subscription, RenewalEvent } = require('./models');
 const { seedDatabase } = require('../scripts/seedData');
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -12,6 +12,31 @@ async function resolveMongoUri() {
   const mongod = await MongoMemoryServer.create();
   console.log('MONGODB_URI not set: using an in-memory MongoDB (data resets on restart).');
   return mongod.getUri('monthstick');
+}
+
+// Production data created by the duplicate-renewal bug already contains more than one event for
+// the same (subscription, billingMonth). The unique index that prevents future duplicates cannot
+// be built over that data, so we first collapse each duplicate group to a single event. This is the
+// data migration that would run during rollout, before the new constraint is enforced.
+// We keep the earliest-created event in each group and remove the surplus rows.
+async function dedupeRenewalEvents() {
+  const duplicateGroups = await RenewalEvent.aggregate([
+    { $sort: { createdAt: 1, _id: 1 } },
+    {
+      $group: {
+        _id: { subscription: '$subscription', billingMonth: '$billingMonth' },
+        ids: { $push: '$_id' },
+        count: { $sum: 1 },
+      },
+    },
+    { $match: { count: { $gt: 1 } } },
+  ]);
+
+  const idsToRemove = duplicateGroups.flatMap((group) => group.ids.slice(1));
+  if (idsToRemove.length > 0) {
+    const { deletedCount } = await RenewalEvent.deleteMany({ _id: { $in: idsToRemove } });
+    console.log(`[startup] removed ${deletedCount} duplicate renewal event(s) before building the unique index.`);
+  }
 }
 
 // Indexes are built after startup data is in place, like a production deploy against existing data.
@@ -34,6 +59,7 @@ async function main() {
     await seedDatabase({ large: process.env.SEED_LARGE === 'true' });
     console.log('Seeded sample data (a snapshot of production).');
   }
+  await dedupeRenewalEvents();
   await ensureIndexes();
 
   createApp().listen(PORT, () => {
